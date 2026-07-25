@@ -5,6 +5,7 @@
 #include "client/meta/MetaClient.h"
 #include "client/storage/StorageClient.h"
 #include "common/utils/Result.h"
+#include "nds.h"
 
 namespace hf3fs::lib::agent {
 using flat::UserInfo;
@@ -38,6 +39,29 @@ class PioV {
                                const storage::client::WriteOptions &options = storage::client::WriteOptions());
   void finishIo(bool allowHoles);
 
+  // NPU 直通 I/O 方法
+  hf3fs::Result<Void> addNpuDirectRead(size_t idx,
+                                       const meta::Inode &inode,
+                                       uint16_t track,
+                                       off_t off,
+                                       size_t len,
+                                       const nds_segment_info_t *segInfo,
+                                       void *ndsBufAddr,
+                                       uint64_t ndsBufSize);
+  hf3fs::Result<Void> addNpuDirectWrite(size_t idx,
+                                        const meta::Inode &inode,
+                                        uint16_t track,
+                                        off_t off,
+                                        size_t len,
+                                        const nds_segment_info_t *segInfo,
+                                        void *ndsBufAddr,
+                                        uint64_t ndsBufSize);
+  CoTryTask<void> executeNpuDirectRead(const UserInfo &userInfo,
+                                       const storage::client::ReadOptions &options = storage::client::ReadOptions());
+  CoTryTask<void> executeNpuDirectWrite(const UserInfo &userInfo,
+                                        const storage::client::WriteOptions &options = storage::client::WriteOptions());
+  bool hasNpuDirectIO() const { return !npuRios_.empty() || !npuWios_.empty(); }
+
  private:
   Result<Void> chunkIo(
       const meta::Inode &inode,
@@ -55,5 +79,8 @@ class PioV {
   std::vector<storage::client::WriteIO> wios_;
   std::vector<storage::client::TruncateChunkOp> trops_;
   std::map<meta::InodeId, size_t> potentialLens_;
+  // NPU 直通 I/O 列表
+  std::vector<storage::client::NpuDirectReadIO> npuRios_;
+  std::vector<storage::client::NpuDirectWriteIO> npuWios_;
 };
 }  // namespace hf3fs::lib::agent

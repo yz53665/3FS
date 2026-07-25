@@ -37,6 +37,14 @@ class StorageClientImpl : public StorageClient {
                              const WriteOptions &options = WriteOptions(),
                              std::vector<WriteIO *> *failedIOs = nullptr) override;
 
+  CoTryTask<void> batchNpuDirectRead(std::span<NpuDirectReadIO> readIOs,
+                                     const flat::UserInfo &userInfo,
+                                     const ReadOptions &options = ReadOptions()) override;
+
+  CoTryTask<void> batchNpuDirectWrite(std::span<NpuDirectWriteIO> writeIOs,
+                                      const flat::UserInfo &userInfo,
+                                      const WriteOptions &options = WriteOptions()) override;
+
   CoTryTask<void> read(ReadIO &readIO,
                        const flat::UserInfo &userInfo,
                        const ReadOptions &options = ReadOptions()) override;

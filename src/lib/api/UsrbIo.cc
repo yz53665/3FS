@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cstring>
 #include <fcntl.h>
 #include <fmt/format.h>
 #include <folly/logging/xlog.h>
@@ -15,6 +16,7 @@
 #include "lib/api/hf3fs.h"
 #include "lib/api/hf3fs_usrbio.h"
 #include "lib/common/Shm.h"
+#include "nds.h"
 
 struct Hf3fsInitLib {
   Hf3fsInitLib() {
@@ -665,6 +667,71 @@ int hf3fs_prep_io(const struct hf3fs_ior *ior,
 
   hf3fs::Uuid id;
   memcpy(id.data, ior->iov.id, sizeof(id.data));
+
+  return *idx;
+}
+
+int hf3fs_prep_npu_direct_io(const struct hf3fs_ior *ior,
+                             bool read,
+                             int fd,
+                             size_t off,
+                             uint64_t len,
+                             void *nds_segment_info,
+                             void *nds_buf_addr,
+                             uint64_t nds_buf_size,
+                             const void *userdata) {
+  auto afd = abs(fd);
+  if (!ior || !ior->iorh || read != ior->for_read || len <= 0 ||
+      !nds_segment_info || !nds_buf_addr || afd >= (int)regfds.size()) {
+    return -EINVAL;
+  }
+
+  auto regfd = regfds[afd].load();
+  if (!regfd) {
+    return -EBADF;
+  }
+
+  int status = regfd->status;
+  if ((read && (status & O_ACCMODE) == O_WRONLY) ||
+      (!read && (status & O_ACCMODE) == O_RDONLY)) {
+    return -EACCES;
+  }
+
+  auto &iorh = *(Hf3fsIorHandle *)ior->iorh;
+  auto &ring = *iorh.ior;
+
+  auto idx = ring.slots.alloc();
+  if (!idx) {
+    return -EAGAIN;
+  }
+
+  auto *segInfo = static_cast<nds_segment_info_t *>(nds_segment_info);
+
+  auto &args = ring.ringSection[*idx];
+  // 填充文件信息（同普通模式）
+  args.fileIid = regfd->iid.u64();
+  args.fileOff = off;
+  args.ioLen = len;
+  args.userdata = userdata;
+
+  // 填充 NPU 直通信息
+  args.isNpuDirect = true;
+  memcpy(args.ndsEid, segInfo->eid, sizeof(segInfo->eid));
+  args.ndsUasid = segInfo->uasid;
+  args.ndsJettyId = segInfo->jetty_id;
+  args.ndsTokenId = segInfo->token_id;
+  args.ndsBufAddr = (uint64_t)nds_buf_addr;
+  args.ndsBufSize = nds_buf_size;
+
+  // bufId/bufOff 在 NPU 直通模式下不使用，置零
+  memset(args.bufId, 0, sizeof(args.bufId));
+  args.bufOff = 0;
+
+  auto res = ring.addSqe(*idx, userdata);
+  if (!res) {
+    ring.slots.dealloc(*idx);
+    return -EAGAIN;
+  }
 
   return *idx;
 }

@@ -10,6 +10,7 @@
 #include "fuse/FuseClients.h"
 #include "fuse/FuseOps.h"
 #include "lib/api/hf3fs_usrbio.h"
+#include "nds.h"
 
 namespace hf3fs::fuse {
 std::vector<IoRingJob> IoRing::jobsToProc(int maxJobs) {
@@ -132,9 +133,11 @@ CoTask<void> IoRing::process(
       totalBytes += args.ioLen;
       distinctFiles.insert(args.fileIid);
 
-      Uuid id;
-      memcpy(id.data, args.bufId, sizeof(id.data));
-      distinctBufs.insert(id);
+      if (!args.isNpuDirect) {
+        Uuid id;
+        memcpy(id.data, args.bufId, sizeof(id.data));
+        distinctBufs.insert(id);
+      }
 
       ioSizeDist.addSample(args.ioLen, monitor::TagSet{{"io", ioType}, {"uid", uids}});
 
@@ -143,36 +146,65 @@ CoTask<void> IoRing::process(
         continue;
       }
 
-      if (!bufs[i]) {
-        res[i] = -static_cast<ssize_t>(bufs[i].error().code());
-        continue;
-      }
+      if (args.isNpuDirect) {
+        // === NPU 直通路径 ===
+        if (!forRead_) {
+          auto beginWrite =
+              co_await inodes[i]->beginWrite(userInfo_, *getFuseClientsInstance().metaClient, args.fileOff, args.ioLen);
+          if (beginWrite.hasError()) {
+            res[i] = -static_cast<ssize_t>(beginWrite.error().code());
+            continue;
+          }
+          truncateVers[i] = *beginWrite;
+        }
 
-      auto memh = co_await bufs[i]->memh(args.ioLen);
-      if (!memh) {
-        res[i] = -static_cast<ssize_t>(memh.error().code());
-        continue;
-      } else if (!bufs[i]->ptr() || !*memh) {
-        XLOGF(ERR, "{} is null when doing usrbio", *memh ? "buf ptr" : "memh");
-        res[i] = -static_cast<ssize_t>(ClientAgentCode::kIovShmFail);
-        continue;
-      }
+        nds_segment_info_t segInfo;
+        memcpy(segInfo.eid, args.ndsEid, sizeof(segInfo.eid));
+        segInfo.uasid = args.ndsUasid;
+        segInfo.jetty_id = args.ndsJettyId;
+        segInfo.token_id = args.ndsTokenId;
 
-      if (!forRead_) {
-        auto beginWrite =
-            co_await inodes[i]->beginWrite(userInfo_, *getFuseClientsInstance().metaClient, args.fileOff, args.ioLen);
-        if (beginWrite.hasError()) {
-          res[i] = -static_cast<ssize_t>(beginWrite.error().code());
+        auto addRes = forRead_
+            ? ioExec.addNpuDirectRead(i, inodes[i]->inode, 0, args.fileOff, args.ioLen,
+                                      &segInfo, (void *)args.ndsBufAddr, args.ndsBufSize)
+            : ioExec.addNpuDirectWrite(i, inodes[i]->inode, 0, args.fileOff, args.ioLen,
+                                       &segInfo, (void *)args.ndsBufAddr, args.ndsBufSize);
+        if (!addRes) {
+          res[i] = -static_cast<ssize_t>(addRes.error().code());
+        }
+      } else {
+        // === 原有普通路径 ===
+        if (!bufs[i]) {
+          res[i] = -static_cast<ssize_t>(bufs[i].error().code());
           continue;
         }
-        truncateVers[i] = *beginWrite;
-      }
 
-      auto addRes = forRead_
-                        ? ioExec.addRead(i, inodes[i]->inode, 0, args.fileOff, args.ioLen, bufs[i]->ptr(), **memh)
-                        : ioExec.addWrite(i, inodes[i]->inode, 0, args.fileOff, args.ioLen, bufs[i]->ptr(), **memh);
-      if (!addRes) {
-        res[i] = -static_cast<ssize_t>(addRes.error().code());
+        auto memh = co_await bufs[i]->memh(args.ioLen);
+        if (!memh) {
+          res[i] = -static_cast<ssize_t>(memh.error().code());
+          continue;
+        } else if (!bufs[i]->ptr() || !*memh) {
+          XLOGF(ERR, "{} is null when doing usrbio", *memh ? "buf ptr" : "memh");
+          res[i] = -static_cast<ssize_t>(ClientAgentCode::kIovShmFail);
+          continue;
+        }
+
+        if (!forRead_) {
+          auto beginWrite =
+              co_await inodes[i]->beginWrite(userInfo_, *getFuseClientsInstance().metaClient, args.fileOff, args.ioLen);
+          if (beginWrite.hasError()) {
+            res[i] = -static_cast<ssize_t>(beginWrite.error().code());
+            continue;
+          }
+          truncateVers[i] = *beginWrite;
+        }
+
+        auto addRes = forRead_
+                          ? ioExec.addRead(i, inodes[i]->inode, 0, args.fileOff, args.ioLen, bufs[i]->ptr(), **memh)
+                          : ioExec.addWrite(i, inodes[i]->inode, 0, args.fileOff, args.ioLen, bufs[i]->ptr(), **memh);
+        if (!addRes) {
+          res[i] = -static_cast<ssize_t>(addRes.error().code());
+        }
       }
     }
 
@@ -189,8 +221,12 @@ CoTask<void> IoRing::process(
     if (flags_ & HF3FS_IOR_ALLOW_READ_UNCOMMITTED) {
       readOpt.set_allowReadUncommitted(true);
     }
-    auto execRes = co_await (forRead_ ? ioExec.executeRead(userInfo_, readOpt)
-                                      : ioExec.executeWrite(userInfo_, storageIo.write()));
+    bool hasNpuDirect = ioExec.hasNpuDirectIO();
+    auto execRes = hasNpuDirect
+        ? co_await (forRead_ ? ioExec.executeNpuDirectRead(userInfo_, readOpt)
+                             : ioExec.executeNpuDirectWrite(userInfo_, storageIo.write()))
+        : co_await (forRead_ ? ioExec.executeRead(userInfo_, readOpt)
+                             : ioExec.executeWrite(userInfo_, storageIo.write()));
 
     now = SteadyClock::now();
     submitLatency.addSample(now - start, monitor::TagSet{{"io", ioType}, {"uid", uids}});

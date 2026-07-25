@@ -1,6 +1,8 @@
 #pragma once
 
 #include <folly/concurrency/AtomicSharedPtr.h>
+#include <shared_mutex>
+#include <unordered_map>
 
 #include "client/mgmtd/MgmtdClientForServer.h"
 #include "client/storage/StorageMessenger.h"
@@ -9,6 +11,7 @@
 #include "common/utils/LockManager.h"
 #include "common/utils/RobinHood.h"
 #include "fbs/storage/Service.h"
+#include "nds.h"
 #include "storage/aio/AioReadWorker.h"
 #include "storage/service/BufferPool.h"
 #include "storage/service/StorageOperator.h"
@@ -24,6 +27,24 @@
 namespace hf3fs::storage {
 
 class ReliableForwarding;
+
+class NdsFileHandleCache {
+ public:
+  nds_Handle getOrRegister(int fd) {
+    {
+      std::shared_lock lock(mtx_);
+      auto it = cache_.find(fd);
+      if (it != cache_.end()) return it->second;
+    }
+    std::unique_lock lock(mtx_);
+    auto [it, _] = cache_.try_emplace(fd, nds_file_register(fd));
+    return it->second;
+  }
+
+ private:
+  std::shared_mutex mtx_;
+  std::unordered_map<int, nds_Handle> cache_;
+};
 
 struct Components {
   struct Config : public ConfigBase<Config> {
@@ -118,6 +139,7 @@ struct Components {
   DynamicCoroutinesPool defaultPool;
   StorageOperator storageOperator;
   ReliableUpdate reliableUpdate;
+  NdsFileHandleCache ndsCache;
   std::atomic<uint32_t> triggerHeartbeatFlag{};
 };
 

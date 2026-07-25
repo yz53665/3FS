@@ -24,6 +24,16 @@ struct IoArgs {
   uint64_t ioLen;
 
   const void *userdata;
+
+  // === NPU 直通字段 ===
+  bool isNpuDirect;
+  uint8_t reserved[7];           // 对齐填充
+  uint8_t ndsEid[16];            // NDS endpoint identifier
+  uint32_t ndsUasid;             // NDS user ASID
+  uint32_t ndsJettyId;           // NDS jetty ID
+  uint32_t ndsTokenId;           // NDS token ID
+  uint64_t ndsBufAddr;           // NPU HBM 物理地址
+  uint64_t ndsBufSize;           // HBM buffer 大小
 };
 
 struct IoSqe {

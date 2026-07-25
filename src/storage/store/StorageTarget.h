@@ -161,6 +161,10 @@ class StorageTarget : public enable_shared_from_this<StorageTarget> {
   // check if chunk engine is used.
   inline bool useChunkEngine() const { return targetConfig_.only_chunk_engine; }
 
+  // 获取 chunk 文件的 fd（用于 NDS 直通）
+  // 返回 normal_ fd (O_RDWR|O_SYNC)，无需对齐
+  Result<int> getChunkFd(const ChunkId &chunkId);
+
  private:
   const Config &config_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>();

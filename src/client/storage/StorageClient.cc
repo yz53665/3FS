@@ -67,6 +67,31 @@ WriteIO StorageClient::createWriteIO(ChainId chainId,
   return WriteIO{requestId, chainId, chunkId, offset, length, chunkSize, data, buffer, userCtx};
 }
 
+NpuDirectReadIO StorageClient::createNpuDirectReadIO(ChainId chainId,
+                                                     const ChunkId &chunkId,
+                                                     uint32_t offset,
+                                                     uint32_t length,
+                                                     const nds_segment_info_t &segInfo,
+                                                     uint8_t *ndsBufAddr,
+                                                     uint64_t ndsBufSize,
+                                                     void *userCtx) {
+  return NpuDirectReadIO(chainId, chunkId, offset, length, segInfo, ndsBufAddr, ndsBufSize, userCtx);
+}
+
+NpuDirectWriteIO StorageClient::createNpuDirectWriteIO(ChainId chainId,
+                                                       const ChunkId &chunkId,
+                                                       uint32_t offset,
+                                                       uint32_t length,
+                                                       uint32_t chunkSize,
+                                                       const nds_segment_info_t &segInfo,
+                                                       uint8_t *ndsBufAddr,
+                                                       uint64_t ndsBufSize,
+                                                       void *userCtx) {
+  RequestId requestId(nextRequestId_.fetch_add(1));
+  return NpuDirectWriteIO(requestId, chainId, chunkId, offset, length, chunkSize,
+                          segInfo, ndsBufAddr, ndsBufSize, userCtx);
+}
+
 QueryLastChunkOp StorageClient::createQueryOp(ChainId chainId,
                                               ChunkId chunkIdBegin,
                                               ChunkId chunkIdEnd,

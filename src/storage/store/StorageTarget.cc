@@ -443,4 +443,14 @@ void StorageTarget::recordRealRead(uint32_t bytes, Duration latency) const {
   readSuccLatencyPerDisk_->addSample(latency);
 }
 
+Result<int> StorageTarget::getChunkFd(const ChunkId &chunkId) {
+  if (useChunkEngine()) {
+    return makeError(StatusCode::kInvalidArg, "ChunkEngine not supported for NDS direct IO");
+  }
+  auto chunkResult = chunkStore_.get(chunkId);
+  RETURN_ON_ERROR(chunkResult);
+  auto &view = (*chunkResult)->second.view;
+  return view.normal_;
+}
+
 }  // namespace hf3fs::storage

@@ -2,6 +2,7 @@
 
 #include <boost/range/adaptor/reversed.hpp>
 #include <fmt/format.h>
+#include <nds.h>
 
 #include "common/monitor/Recorder.h"
 #include "common/net/RDMAControl.h"
@@ -153,6 +154,50 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
     job.state().bufferIndex = buffer.index();
   }
   prepareBufferRecordGuard.report(true);
+
+  if (BITFLAGS_CONTAIN(req.featureFlags, FeatureFlags::NPU_DIRECT_IO)) {
+    // NPU 直通读：跳过 AIO + RDMA write，直接 NDS 读取
+    for (AioReadJobIterator it(&batch); it; it++) {
+      const auto &readIO = it->readIO();
+      auto target = it->state().storageTarget;
+
+      auto fdResult = target->getChunkFd(readIO.key.chunkId);
+      if (UNLIKELY(!fdResult)) {
+        it->result().lengthInfo = makeError(std::move(fdResult.error()));
+        batch.finish(&*it);
+        continue;
+      }
+
+      nds_segment_info_t segInfo;
+      memcpy(segInfo.eid, readIO.ndsEid.data(), 16);
+      segInfo.uasid = readIO.ndsUasid;
+      segInfo.jetty_id = readIO.ndsJettyId;
+      segInfo.token_id = readIO.ndsTokenId;
+
+      auto ndsHandle = components_.ndsCache.getOrRegister(*fdResult);
+
+      // NDS 同步调用卸载到后台线程池
+      ssize_t ret = co_await folly::coro::co_invoke_on(
+          components_.bgExecutor(),
+          [&]() {
+            return nds_read_imported(ndsHandle, &segInfo,
+                (void *)readIO.ndsBufAddr, readIO.length, readIO.offset);
+          }
+      );
+
+      if (ret >= 0) {
+        it->result().lengthInfo = (uint32_t)ret;
+      } else {
+        it->result().lengthInfo = makeError(StorageCode::kChunkReadFailed);
+      }
+      batch.finish(&*it);
+    }
+
+    // 跳过后续 AIO + RDMA 路径
+    co_await batch.complete();
+    recordGuard.succ();
+    co_return rsp;
+  }
 
   if (BITFLAGS_CONTAIN(req.featureFlags, FeatureFlags::BYPASS_DISKIO)) {
     for (AioReadJobIterator it(&batch); it; it++) {
@@ -530,6 +575,48 @@ CoTask<IOResult> StorageOperator::doUpdate(ServiceRequestContext &requestCtx,
                                            bool allowToAllocate) {
   auto recordGuard = storageDoUpdateRecorder.record();
   UpdateJob job(requestCtx, updateIO, updateOptions, chunkEngineJob, target, allowToAllocate);
+
+  if (BITFLAGS_CONTAIN(featureFlags, FeatureFlags::NPU_DIRECT_IO)) {
+    // NPU 直通写：跳过 buffer 分配 + RDMA read
+    auto fdResult = target->getChunkFd(updateIO.key.chunkId);
+    if (UNLIKELY(!fdResult)) {
+      co_return makeError(std::move(fdResult.error()));
+    }
+
+    nds_segment_info_t segInfo;
+    memcpy(segInfo.eid, updateIO.ndsEid.data(), 16);
+    segInfo.uasid = updateIO.ndsUasid;
+    segInfo.jetty_id = updateIO.ndsJettyId;
+    segInfo.token_id = updateIO.ndsTokenId;
+
+    auto ndsHandle = components_.ndsCache.getOrRegister(*fdResult);
+
+    // NDS 同步写卸载到后台线程池
+    ssize_t ret = co_await folly::coro::co_invoke_on(
+        components_.bgExecutor(),
+        [&]() {
+          return nds_write_imported(ndsHandle, &segInfo,
+              (void *)updateIO.ndsBufAddr, updateIO.length, updateIO.offset);
+        }
+    );
+
+    if (ret < 0) {
+      co_return makeError(StorageCode::kChunkWriteFailed);
+    }
+
+    // 数据已通过 NDS 写入磁盘，仍需 UpdateWorker 更新元数据
+    // state.data 置为 nullptr，ChunkReplica::update() 中跳过逐写校验
+    job.state().data = nullptr;
+    job.state().isNpuDirect = true;
+
+    co_await updateWorker_.enqueue(&job);
+    co_await job.complete();
+
+    if (LIKELY(bool(job.result().lengthInfo))) {
+      recordGuard.succ();
+    }
+    co_return std::move(job.result());
+  }
 
   if (BITFLAGS_CONTAIN(featureFlags, FeatureFlags::SEND_DATA_INLINE)) {
     if (updateIO.inlinebuf.data.size() != updateIO.length) {

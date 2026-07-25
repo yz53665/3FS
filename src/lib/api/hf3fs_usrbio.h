@@ -157,6 +157,20 @@ int hf3fs_prep_io(const struct hf3fs_ior *ior,
                   size_t off,
                   uint64_t len,
                   const void *userdata);
+// NPU 直通 I/O 准备接口
+// >= 0 for io index, -errno for error
+// nds_segment_info: 由上层通过 nds_get_segment_info() 获取的 NDS 段信息
+// nds_buf_addr: NPU HBM 物理地址
+// nds_buf_size: HBM buffer 大小
+int hf3fs_prep_npu_direct_io(const struct hf3fs_ior *ior,
+                             bool read,
+                             int fd,
+                             size_t off,
+                             uint64_t len,
+                             void *nds_segment_info,
+                             void *nds_buf_addr,
+                             uint64_t nds_buf_size,
+                             const void *userdata);
 // 0 for success, -errno for error
 int hf3fs_submit_ios(const struct hf3fs_ior *ior);
 // >= 0 for result count, -errno for error, may return fewer than ready, call again to make sure

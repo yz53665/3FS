@@ -96,6 +96,26 @@ CoTryTask<void> StorageClientInMem::batchWrite(std::span<WriteIO> writeIOs,
   co_return Void{};
 }
 
+CoTryTask<void> StorageClientInMem::batchNpuDirectRead(std::span<NpuDirectReadIO> readIOs,
+                                                       const flat::UserInfo &userInfo,
+                                                       const ReadOptions &options) {
+  boost::ignore_unused(userInfo, options);
+  for (auto &io : readIOs) {
+    io.result.lengthInfo = makeError(StatusCode::kNotImplemented);
+  }
+  co_return Void{};
+}
+
+CoTryTask<void> StorageClientInMem::batchNpuDirectWrite(std::span<NpuDirectWriteIO> writeIOs,
+                                                        const flat::UserInfo &userInfo,
+                                                        const WriteOptions &options) {
+  boost::ignore_unused(userInfo, options);
+  for (auto &io : writeIOs) {
+    io.result.lengthInfo = makeError(StatusCode::kNotImplemented);
+  }
+  co_return Void{};
+}
+
 CoTryTask<void> StorageClientInMem::read(ReadIO &readIO, const flat::UserInfo &userInfo, const ReadOptions &options) {
   return batchRead(std::span(&readIO, 1), userInfo, options, nullptr);
 }

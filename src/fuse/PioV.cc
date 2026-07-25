@@ -182,6 +182,96 @@ CoTryTask<void> PioV::executeWrite(const UserInfo &userInfo, const storage::clie
   co_return co_await storageClient_.batchWrite(wios_, userInfo, options);
 }
 
+// NPU 直通 I/O 方法实现
+
+hf3fs::Result<Void> PioV::addNpuDirectRead(size_t idx,
+                                           const meta::Inode &inode,
+                                           uint16_t track,
+                                           off_t off,
+                                           size_t len,
+                                           const nds_segment_info_t *segInfo,
+                                           void *ndsBufAddr,
+                                           uint64_t ndsBufSize) {
+  if (!npuWios_.empty()) {
+    return makeError(StatusCode::kInvalidArg, "adding read to write operations");
+  } else if (!inode.isFile()) {
+    res_[idx] = -static_cast<ssize_t>(MetaCode::kNotFile);
+    return Void{};
+  }
+
+  if (npuRios_.empty()) {
+    npuRios_.reserve(res_.size());
+  }
+
+  RETURN_ON_ERROR(chunkIo(inode,
+                          track,
+                          off,
+                          len,
+                          [this, segInfo, ndsBufAddr, ndsBufSize, idx](storage::ChainId chain,
+                                                                        storage::ChunkId chunk,
+                                                                        uint32_t,
+                                                                        uint32_t chunkOff,
+                                                                        uint32_t chunkLen) {
+                            npuRios_.emplace_back(storageClient_.createNpuDirectReadIO(
+                                chain, chunk, chunkOff, chunkLen, *segInfo,
+                                (uint8_t *)ndsBufAddr, ndsBufSize, reinterpret_cast<void *>(idx)));
+                          }));
+
+  return Void{};
+}
+
+hf3fs::Result<Void> PioV::addNpuDirectWrite(size_t idx,
+                                            const meta::Inode &inode,
+                                            uint16_t track,
+                                            off_t off,
+                                            size_t len,
+                                            const nds_segment_info_t *segInfo,
+                                            void *ndsBufAddr,
+                                            uint64_t ndsBufSize) {
+  if (!npuRios_.empty()) {
+    return makeError(StatusCode::kInvalidArg, "adding write to read operations");
+  } else if (!inode.isFile()) {
+    res_[idx] = -static_cast<ssize_t>(MetaCode::kNotFile);
+    return Void{};
+  }
+
+  if (npuWios_.empty()) {
+    npuWios_.reserve(res_.size());
+  }
+
+  RETURN_ON_ERROR(chunkIo(inode,
+                          track,
+                          off,
+                          len,
+                          [this, segInfo, ndsBufAddr, ndsBufSize, idx](storage::ChainId chain,
+                                                                        storage::ChunkId chunk,
+                                                                        uint32_t chunkSize,
+                                                                        uint32_t chunkOff,
+                                                                        uint32_t chunkLen) {
+                            npuWios_.emplace_back(storageClient_.createNpuDirectWriteIO(
+                                chain, chunk, chunkOff, chunkLen, chunkSize, *segInfo,
+                                (uint8_t *)ndsBufAddr, ndsBufSize, reinterpret_cast<void *>(idx)));
+                          }));
+
+  return Void{};
+}
+
+CoTryTask<void> PioV::executeNpuDirectRead(const UserInfo &userInfo, const storage::client::ReadOptions &options) {
+  assert(npuWios_.empty());
+  if (npuRios_.empty()) {
+    co_return Void{};
+  }
+  co_return co_await storageClient_.batchNpuDirectRead(npuRios_, userInfo, options);
+}
+
+CoTryTask<void> PioV::executeNpuDirectWrite(const UserInfo &userInfo, const storage::client::WriteOptions &options) {
+  assert(npuRios_.empty());
+  if (npuWios_.empty()) {
+    co_return Void{};
+  }
+  co_return co_await storageClient_.batchNpuDirectWrite(npuWios_, userInfo, options);
+}
+
 template <typename Io>
 void concatIoRes(bool read, std::vector<ssize_t> &res, const Io &ios, bool allowHoles) {
   ssize_t lastIovIdx = -1;
@@ -266,7 +356,11 @@ void concatIoRes(bool read, std::vector<ssize_t> &res, const Io &ios, bool allow
 }
 
 void PioV::finishIo(bool allowHoles) {
-  if (wios_.empty()) {
+  if (!npuRios_.empty()) {
+    concatIoRes(true, res_, npuRios_, allowHoles);
+  } else if (!npuWios_.empty()) {
+    concatIoRes(false, res_, npuWios_, false);
+  } else if (wios_.empty()) {
     concatIoRes(true, res_, rios_, allowHoles);
   } else {
     concatIoRes(false, res_, wios_, false);

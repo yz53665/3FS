@@ -111,6 +111,7 @@ class UpdateJob {
   folly::coro::Baton baton_;
   struct State {
     const uint8_t *data = nullptr;
+    bool isNpuDirect = false;  // NPU 直通模式标记
   } state_;
   bool allowToAllocate_ = true;
 };

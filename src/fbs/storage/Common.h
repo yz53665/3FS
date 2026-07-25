@@ -75,6 +75,7 @@ enum class FeatureFlags : uint32_t {
   BYPASS_RDMAXMIT = 2,
   SEND_DATA_INLINE = 4,
   ALLOW_READ_UNCOMMITTED = 8,
+  NPU_DIRECT_IO = 16,
 };
 
 constexpr auto kAIOAlignSize = 4096ul;
@@ -311,6 +312,13 @@ struct ReadIO {
   SERDE_STRUCT_FIELD(length, uint32_t{});
   SERDE_STRUCT_FIELD(key, GlobalKey{});
   SERDE_STRUCT_FIELD(rdmabuf, net::RDMARemoteBuf{});
+  // NDS 直通字段
+  SERDE_STRUCT_FIELD(ndsEid, std::array<uint8_t, 16>{});
+  SERDE_STRUCT_FIELD(ndsUasid, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsJettyId, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsTokenId, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsBufAddr, uint64_t{});
+  SERDE_STRUCT_FIELD(ndsBufSize, uint64_t{});
 };
 static_assert(serde::Serializable<ReadIO>);
 
@@ -333,6 +341,13 @@ struct UpdateIO {
   SERDE_STRUCT_FIELD(updateType, UpdateType{});
   SERDE_STRUCT_FIELD(checksum, ChecksumInfo{});
   SERDE_STRUCT_FIELD(inlinebuf, UInt8Vector{});
+  // NDS 直通字段
+  SERDE_STRUCT_FIELD(ndsEid, std::array<uint8_t, 16>{});
+  SERDE_STRUCT_FIELD(ndsUasid, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsJettyId, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsTokenId, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsBufAddr, uint64_t{});
+  SERDE_STRUCT_FIELD(ndsBufSize, uint64_t{});
 
  public:
   bool isWrite() const { return updateType == UpdateType::WRITE; }

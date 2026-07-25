@@ -13,6 +13,7 @@
 #include "common/utils/Semaphore.h"
 #include "fbs/mgmtd/RoutingInfo.h"
 #include "fbs/storage/Common.h"
+#include "nds.h"
 
 namespace hf3fs::storage::client {
 
@@ -153,6 +154,85 @@ class WriteIO : public IOBase {
 
  public:
   const RequestId requestId;
+  ChecksumInfo checksum;
+};
+
+/* NPU 直通读 IO */
+class NpuDirectReadIO : public folly::MoveOnly {
+ private:
+  NpuDirectReadIO(ChainId chainId,
+                  const ChunkId &chunkId,
+                  uint32_t offset,
+                  uint32_t length,
+                  const nds_segment_info_t &segInfo,
+                  uint8_t *ndsBufAddr,
+                  uint64_t ndsBufSize,
+                  void *userCtx)
+      : routingTarget(chainId),
+        chunkId(chunkId),
+        offset(offset),
+        length(length),
+        segInfo(segInfo),
+        ndsBufAddr(ndsBufAddr),
+        ndsBufSize(ndsBufSize),
+        userCtx(userCtx) {}
+
+  friend class StorageClient;
+  friend class StorageClientImpl;
+  friend class StorageClientInMem;
+
+ public:
+  RoutingTarget routingTarget;
+  ChunkId chunkId;
+  uint32_t offset;
+  uint32_t length;
+  nds_segment_info_t segInfo;
+  uint8_t *ndsBufAddr;
+  uint64_t ndsBufSize;
+  void *userCtx;
+  IOResult result;
+};
+
+/* NPU 直通写 IO */
+class NpuDirectWriteIO : public folly::MoveOnly {
+ private:
+  NpuDirectWriteIO(RequestId requestId,
+                   ChainId chainId,
+                   const ChunkId &chunkId,
+                   uint32_t offset,
+                   uint32_t length,
+                   uint32_t chunkSize,
+                   const nds_segment_info_t &segInfo,
+                   uint8_t *ndsBufAddr,
+                   uint64_t ndsBufSize,
+                   void *userCtx)
+      : requestId(requestId),
+        routingTarget(chainId),
+        chunkId(chunkId),
+        offset(offset),
+        length(length),
+        chunkSize(chunkSize),
+        segInfo(segInfo),
+        ndsBufAddr(ndsBufAddr),
+        ndsBufSize(ndsBufSize),
+        userCtx(userCtx) {}
+
+  friend class StorageClient;
+  friend class StorageClientImpl;
+  friend class StorageClientInMem;
+
+ public:
+  RequestId requestId;
+  RoutingTarget routingTarget;
+  ChunkId chunkId;
+  uint32_t offset;
+  uint32_t length;
+  uint32_t chunkSize;
+  nds_segment_info_t segInfo;
+  uint8_t *ndsBufAddr;
+  uint64_t ndsBufSize;
+  void *userCtx;
+  IOResult result;
   ChecksumInfo checksum;
 };
 
@@ -473,6 +553,27 @@ class StorageClient : public folly::MoveOnly {
                                 IOBuffer *buffer,
                                 void *userCtx = nullptr);
 
+  /* NPU 直通读 IO 创建 */
+  virtual NpuDirectReadIO createNpuDirectReadIO(ChainId chainId,
+                                                const ChunkId &chunkId,
+                                                uint32_t offset,
+                                                uint32_t length,
+                                                const nds_segment_info_t &segInfo,
+                                                uint8_t *ndsBufAddr,
+                                                uint64_t ndsBufSize,
+                                                void *userCtx = nullptr);
+
+  /* NPU 直通写 IO 创建 */
+  virtual NpuDirectWriteIO createNpuDirectWriteIO(ChainId chainId,
+                                                  const ChunkId &chunkId,
+                                                  uint32_t offset,
+                                                  uint32_t length,
+                                                  uint32_t chunkSize,
+                                                  const nds_segment_info_t &segInfo,
+                                                  uint8_t *ndsBufAddr,
+                                                  uint64_t ndsBufSize,
+                                                  void *userCtx = nullptr);
+
   /* Query the chunk with largest lexicographical id in range [chunkIdBegin, chunkIdEnd).
      `totalChunkLen' and `totalNumChunks' of chunks in the range are calculated and included in
      `QueryLastChunkResult'.
@@ -525,6 +626,14 @@ class StorageClient : public folly::MoveOnly {
                                      const flat::UserInfo &userInfo,
                                      const WriteOptions &options = WriteOptions(),
                                      std::vector<WriteIO *> *failedIOs = nullptr) = 0;
+
+  virtual CoTryTask<void> batchNpuDirectRead(std::span<NpuDirectReadIO> readIOs,
+                                             const flat::UserInfo &userInfo,
+                                             const ReadOptions &options = ReadOptions()) = 0;
+
+  virtual CoTryTask<void> batchNpuDirectWrite(std::span<NpuDirectWriteIO> writeIOs,
+                                              const flat::UserInfo &userInfo,
+                                              const WriteOptions &options = WriteOptions()) = 0;
 
   virtual CoTryTask<void> read(ReadIO &readIO,
                                const flat::UserInfo &userInfo,

@@ -1752,6 +1752,127 @@ CoTryTask<void> StorageClientImpl::read(ReadIO &readIO, const flat::UserInfo &us
   co_return co_await batchReadWithRetry(requestCtx, readIOs, userInfo, options, failedIOs);
 }
 
+// NPU 直通读操作
+
+CoTryTask<void> StorageClientImpl::batchNpuDirectRead(std::span<NpuDirectReadIO> readIOs,
+                                                      const flat::UserInfo &userInfo,
+                                                      const ReadOptions &options) {
+  ClientRequestContext requestCtx(MethodType::batchRead, userInfo, options.debug(), config_, readIOs.size());
+
+  // 按 target 分组
+  std::map<VersionedChainId, std::vector<NpuDirectReadIO *>> grouped;
+  for (auto &io : readIOs) {
+    grouped[io.routingTarget.getVersionedChainId()].push_back(&io);
+  }
+
+  for (auto &[vChainId, ios] : grouped) {
+    BatchReadReq req;
+    req.userInfo = userInfo;
+    BITFLAGS_SET(req.featureFlags, FeatureFlags::NPU_DIRECT_IO);
+    req.payloads.reserve(ios.size());
+
+    for (auto *io : ios) {
+      ReadIO readIO;
+      readIO.offset = io->offset;
+      readIO.length = io->length;
+      readIO.key = GlobalKey{vChainId, io->chunkId};
+      // 填充 NDS 字段
+      memcpy(readIO.ndsEid.data(), io->segInfo.eid, 16);
+      readIO.ndsUasid = io->segInfo.uasid;
+      readIO.ndsJettyId = io->segInfo.jetty_id;
+      readIO.ndsTokenId = io->segInfo.token_id;
+      readIO.ndsBufAddr = (uint64_t)io->ndsBufAddr;
+      readIO.ndsBufSize = io->ndsBufSize;
+      req.payloads.push_back(std::move(readIO));
+    }
+
+    // 发送 RPC
+    auto targetResult = getCurrentRoutingInfo();
+    if (!targetResult) {
+      for (auto *io : ios) {
+        io->result.lengthInfo = makeError(StorageClientCode::kRoutingVersionMismatch);
+      }
+      continue;
+    }
+
+    auto nodeId = flat::NodeId(vChainId.chainId);
+    auto nodeInfo = getNodeInfo(targetResult, nodeId);
+    if (!nodeInfo) {
+      for (auto *io : ios) {
+        io->result.lengthInfo = makeError(nodeInfo.error().code());
+      }
+      continue;
+    }
+
+    auto response = co_await callMessengerMethod<BatchReadReq, BatchReadRsp, &StorageMessenger::batchRead>(
+        messenger_, requestCtx, *nodeInfo, req);
+
+    if (response && response->results.size() == ios.size()) {
+      for (size_t i = 0; i < ios.size(); ++i) {
+        ios[i]->result = response->results[i];
+      }
+    } else {
+      for (auto *io : ios) {
+        io->result.lengthInfo = makeError(StorageClientCode::kResourceBusy);
+      }
+    }
+  }
+
+  co_return Void{};
+}
+
+// NPU 直通写操作
+
+CoTryTask<void> StorageClientImpl::batchNpuDirectWrite(std::span<NpuDirectWriteIO> writeIOs,
+                                                       const flat::UserInfo &userInfo,
+                                                       const WriteOptions &options) {
+  ClientRequestContext requestCtx(MethodType::batchWrite, userInfo, options.debug(), config_, writeIOs.size());
+
+  for (auto &io : writeIOs) {
+    WriteReq req;
+    req.userInfo = userInfo;
+    BITFLAGS_SET(req.featureFlags, FeatureFlags::NPU_DIRECT_IO);
+
+    auto &updateIO = req.payload;
+    updateIO.offset = io.offset;
+    updateIO.length = io.length;
+    updateIO.chunkSize = io.chunkSize;
+    updateIO.key = GlobalKey{io.routingTarget.getVersionedChainId(), io.chunkId};
+    updateIO.updateType = UpdateType::WRITE;
+    // 填充 NDS 字段
+    memcpy(updateIO.ndsEid.data(), io.segInfo.eid, 16);
+    updateIO.ndsUasid = io.segInfo.uasid;
+    updateIO.ndsJettyId = io.segInfo.jetty_id;
+    updateIO.ndsTokenId = io.segInfo.token_id;
+    updateIO.ndsBufAddr = (uint64_t)io.ndsBufAddr;
+    updateIO.ndsBufSize = io.ndsBufSize;
+
+    auto targetResult = getCurrentRoutingInfo();
+    if (!targetResult) {
+      io.result.lengthInfo = makeError(StorageClientCode::kRoutingVersionMismatch);
+      continue;
+    }
+
+    auto nodeId = flat::NodeId(io.routingTarget.chainId);
+    auto nodeInfo = getNodeInfo(targetResult, nodeId);
+    if (!nodeInfo) {
+      io.result.lengthInfo = makeError(nodeInfo.error().code());
+      continue;
+    }
+
+    auto response = co_await callMessengerMethod<WriteReq, WriteRsp, &StorageMessenger::write>(
+        getStorageMessengerForUpdates(), requestCtx, *nodeInfo, req);
+
+    if (response) {
+      io.result = response->result;
+    } else {
+      io.result.lengthInfo = makeError(StorageClientCode::kResourceBusy);
+    }
+  }
+
+  co_return Void{};
+}
+
 // write operation
 
 CoTryTask<void> StorageClientImpl::batchWrite(std::span<WriteIO> writeIOs,

@@ -190,7 +190,8 @@ Result<uint32_t> ChunkReplica::update(ChunkStore &store, UpdateJob &job, folly::
     return makeError(StorageCode::kChainVersionMismatch, std::move(msg));
   }
 
-  if (writeIO.checksum.type != ChecksumType::NONE && writeIO.length != 0) {
+  if (!state.isNpuDirect &&
+      writeIO.checksum.type != ChecksumType::NONE && writeIO.length != 0) {
     auto checksum = ChecksumInfo::create(writeIO.checksum.type, state.data, writeIO.length);
     if (checksum != writeIO.checksum) {
       if (!job.requestCtx().debugFlags.faultInjectionEnabled()) {
@@ -284,7 +285,12 @@ Result<uint32_t> ChunkReplica::update(ChunkStore &store, UpdateJob &job, folly::
     }
 
     // normal write.
-    writeResult = doRealWrite(chunkId, chunkInfo, state.data, writeIO.length, writeIO.offset);
+    if (!state.isNpuDirect) {
+      writeResult = doRealWrite(chunkId, chunkInfo, state.data, writeIO.length, writeIO.offset);
+    } else {
+      // NDS 直通：数据已通过 nds_write_imported 写入磁盘
+      writeResult = writeIO.length;
+    }
     if (writeResult) {
       if (options.isSyncing) meta.size = writeIO.length;
       storageUpdateSeqWrite.addSample(writeIO.offset == chunkSizeBeforeWrite);

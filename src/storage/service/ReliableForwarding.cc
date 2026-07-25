@@ -145,17 +145,34 @@ CoTask<IOResult> ReliableForwarding::doForward(const UpdateReq &req,
   UpdateReq updateReq = req;
   updateReq.options.fromClient = false;
   updateReq.retryCount = retryCount;
-  updateReq.payload.rdmabuf = rdmabuf;
   updateReq.payload.key.vChainId.chainVer = target.vChainId.chainVer;
+
+  bool isNpuDirect = BITFLAGS_CONTAIN(req.featureFlags, FeatureFlags::NPU_DIRECT_IO);
+
+  if (isNpuDirect) {
+    // NDS 直通：直接透传 NDS 段信息，不设置 rdmabuf
+    // updateReq.payload 中已包含 NDS 字段，无需额外处理
+    // 不分配本地 buffer，不做 syncing 特殊处理
+  } else {
+    // 原有 RDMA 路径
+    updateReq.payload.rdmabuf = rdmabuf;
+  }
 
   auto buffer = components_.rdmabufPool.get();
   isSyncing = target.successor->targetInfo.publicState == hf3fs::flat::PublicTargetState::SYNCING;
-  if (isSyncing) {
+
+  if (isNpuDirect) {
+    // NDS 直通模式：syncing 暂不支持，要求后继节点 SERVING
+    if (isSyncing) {
+      co_return makeError(StorageCode::kTargetStateInvalid,
+                          "NDS direct IO not supported for syncing target");
+    }
+  } else if (isSyncing) {
     updateReq.options.isSyncing = true;
     updateReq.options.commitChainVer = target.vChainId.chainVer;
   }
 
-  bool readForSyncing = isSyncing && !req.payload.isRemove() &&
+  bool readForSyncing = !isNpuDirect && isSyncing && !req.payload.isRemove() &&
                         (req.options.isSyncing || req.payload.isTruncate() || req.payload.isExtend() ||
                          (req.payload.isWrite() && req.payload.length != req.payload.chunkSize));
   if (readForSyncing) {
@@ -213,7 +230,7 @@ CoTask<IOResult> ReliableForwarding::doForward(const UpdateReq &req,
     }
 
     recordGuard.succ();
-  } else if (isSyncing && !req.payload.isRemove() && chunkEngineJob.chunk() == nullptr) {
+  } else if (!isNpuDirect && isSyncing && !req.payload.isRemove() && chunkEngineJob.chunk() == nullptr) {
     auto chunkResult = target.storageTarget->queryChunk(req.payload.key.chunkId);
     if (UNLIKELY(!chunkResult)) {
       XLOGF(ERR, "forward query chunk failed, req {}, error {}", updateReq, chunkResult.error());
