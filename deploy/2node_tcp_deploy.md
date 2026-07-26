@@ -299,31 +299,182 @@ admin_cli --config /opt/3fs/config/admin_cli.toml \
 
 ### 4.3 创建 Storage Target
 
+几种 Chain 方案的 Target 数量和 ID 不同，根据自己的场景选择对应方案。
+
+以下命令可批量执行：
+
 ```bash
-# 为机器 A 的 Storage 创建 target (target_id 和 node_id 对应)
+# 为机器 A 的 Storage 创建 target
 admin_cli --config /opt/3fs/config/admin_cli.toml \
     "create-target --node-id 10000 --target-id 1 --disk-index 0 --chain-id 1"
+
+admin_cli --config /opt/3fs/config/admin_cli.toml \
+    "create-target --node-id 10000 --target-id 3 --disk-index 0 --chain-id 2"
 
 # 为机器 B 的 Storage 创建 target
 admin_cli --config /opt/3fs/config/admin_cli.toml \
     "create-target --node-id 10001 --target-id 2 --disk-index 0 --chain-id 1"
+
+admin_cli --config /opt/3fs/config/admin_cli.toml \
+    "create-target --node-id 10001 --target-id 4 --disk-index 0 --chain-id 2"
 ```
 
-### 4.4 创建 Chain Table
+### 4.4 选择 Chain 配置方案
 
-```toml
-# 写入链配置 JSON
+双机场景有几种 Chain 布局可选，根据测试目标选择。
+
+---
+
+#### 方案 A：双副本单链（简单，一个 Head 有压力）
+
+```
+Chain C1: [Target_1(A), Target_2(B)]
+         Head=A          Succ=B
+
+所有 Chunk → C1 → 写请求全部打到 A
+```
+
+每个 Chunk 2 副本，任意一台宕机数据完好。但所有写入的 Head 都在 A，A 的 CPU/网络负载是 B 的两倍。
+
+```bash
 cat > /tmp/chain_table.json << 'EOF'
-{
-  "chainId": 1,
-  "chainVersion": 1,
-  "targets": [
-    { "targetId": 1, "chainId": 1 },
-    { "targetId": 2, "chainId": 1 }
-  ]
-}
+[
+  {
+    "chainId": 1,
+    "chainVersion": 1,
+    "targets": [
+      { "targetId": 1, "chainId": 1 },
+      { "targetId": 2, "chainId": 1 }
+    ]
+  }
+]
 EOF
+```
 
+---
+
+#### 方案 B：双副本双链，Head 互换（推荐）
+
+```
+Chain C1: [Target_1(A), Target_2(B)]     Chain C2: [Target_2(B), Target_1(A)]
+         Head=A          Succ=B                   Head=B          Succ=A
+
+Chunk[偶] → C1 → 写请求打到 A       Chunk[奇] → C2 → 写请求打到 B
+```
+
+Head 负载在两台机器间轮转，写入性能更均衡。容错能力与方案 A 相同。
+
+```bash
+cat > /tmp/chain_table.json << 'EOF'
+[
+  {
+    "chainId": 1,
+    "chainVersion": 1,
+    "targets": [
+      { "targetId": 1, "chainId": 1 },
+      { "targetId": 2, "chainId": 1 }
+    ]
+  },
+  {
+    "chainId": 2,
+    "chainVersion": 1,
+    "targets": [
+      { "targetId": 2, "chainId": 2 },
+      { "targetId": 1, "chainId": 2 }
+    ]
+  }
+]
+EOF
+```
+
+---
+
+#### 方案 C：单副本双链（仅基准测试，无容错）
+
+```
+Chain C1: [Target_1(A)]          Chain C2: [Target_2(B)]
+         单副本                            单副本
+
+Chunk[偶] → C1 → 只存 A         Chunk[奇] → C2 → 只存 B
+```
+
+零转发开销，写延迟最低。但任意一台宕机丢失一半 Chunk，整个文件损坏。**仅用于 NDS 直通延迟基准测试。**
+
+```bash
+# 需要额外的 Target
+admin_cli --config /opt/3fs/config/admin_cli.toml \
+    "create-target --node-id 10000 --target-id 3 --disk-index 0 --chain-id 3"
+admin_cli --config /opt/3fs/config/admin_cli.toml \
+    "create-target --node-id 10001 --target-id 4 --disk-index 0 --chain-id 4"
+
+cat > /tmp/chain_table.json << 'EOF'
+[
+  {
+    "chainId": 3,
+    "chainVersion": 1,
+    "targets": [
+      { "targetId": 3, "chainId": 3 }
+    ]
+  },
+  {
+    "chainId": 4,
+    "chainVersion": 1,
+    "targets": [
+      { "targetId": 4, "chainId": 4 }
+    ]
+  }
+]
+EOF
+```
+
+---
+
+#### 方案对比
+
+| | 方案 A (单链双副本) | 方案 B (双链双副本) | 方案 C (单副本) |
+|---|---|---|---|
+| 副本数 | 2 | 2 | 1 |
+| 容错 | 一台宕机 OK | 一台宕机 OK | 一台宕机全损 |
+| 写 Head | 固定 A | A/B 轮换 | 各自独立 |
+| 写转发 | 1 跳 (A→B) | 1 跳 | 0 跳 |
+| NDS 适用 | 读走本地，写 Head/Forward 各一次 | Head 负载均衡 | 延迟最低，基准参考 |
+| 推荐场景 | 一般测试 | **生产推荐** | 延迟基准 |
+
+---
+
+#### 方案 D：同机多盘（扩展）
+
+如果每台机器有多块盘，可以创建更多 Target 提高吞吐：
+
+```
+Node_A: 盘1 (Target_1), 盘2 (Target_3)
+Node_B: 盘1 (Target_2), 盘2 (Target_4)
+
+Chain C1: [Target_1(A盘1), Target_2(B盘1)]
+Chain C2: [Target_4(B盘2), Target_3(A盘2)]
+```
+
+```bash
+# 机器 A 盘2
+admin_cli --config /opt/3fs/config/admin_cli.toml \
+    "create-target --node-id 10000 --target-id 3 --disk-index 1 --chain-id 2"
+
+# 机器 B 盘2
+admin_cli --config /opt/3fs/config/admin_cli.toml \
+    "create-target --node-id 10001 --target-id 4 --disk-index 1 --chain-id 2"
+```
+
+Storage 配置需添加第二块盘的路径：
+```toml
+[storage]
+target_paths = ['/opt/3fs/data/storage/disk0', '/opt/3fs/data/storage/disk1']
+```
+
+---
+
+创建好 Target 和 Chain 后，上传到集群：
+
+```bash
 admin_cli --config /opt/3fs/config/admin_cli.toml \
     "create-chain-table --path /tmp/chain_table.json"
 ```
