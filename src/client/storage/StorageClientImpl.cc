@@ -1776,11 +1776,16 @@ CoTryTask<void> StorageClientImpl::batchNpuDirectRead(std::span<NpuDirectReadIO>
       readIO.offset = io->offset;
       readIO.length = io->length;
       readIO.key = GlobalKey{vChainId, io->chunkId};
-      // 填充 NDS 字段
-      memcpy(readIO.ndsEid.data(), io->segInfo.eid, 16);
-      readIO.ndsUasid = io->segInfo.uasid;
-      readIO.ndsJettyId = io->segInfo.jetty_id;
-      readIO.ndsTokenId = io->segInfo.token_id;
+      // 填充 NDS 双段字段
+      readIO.npuNodeId = io->npuNodeId;
+      memcpy(readIO.ndsH2dEid.data(), io->h2dSegInfo.eid, 16);
+      readIO.ndsH2dUasid = io->h2dSegInfo.uasid;
+      readIO.ndsH2dJettyId = io->h2dSegInfo.jetty_id;
+      readIO.ndsH2dTokenId = io->h2dSegInfo.token_id;
+      memcpy(readIO.ndsRh2dEid.data(), io->rh2dSegInfo.eid, 16);
+      readIO.ndsRh2dUasid = io->rh2dSegInfo.uasid;
+      readIO.ndsRh2dJettyId = io->rh2dSegInfo.jetty_id;
+      readIO.ndsRh2dTokenId = io->rh2dSegInfo.token_id;
       readIO.ndsBufAddr = (uint64_t)io->ndsBufAddr;
       readIO.ndsBufSize = io->ndsBufSize;
       req.payloads.push_back(std::move(readIO));
@@ -1839,11 +1844,16 @@ CoTryTask<void> StorageClientImpl::batchNpuDirectWrite(std::span<NpuDirectWriteI
     updateIO.chunkSize = io.chunkSize;
     updateIO.key = GlobalKey{io.routingTarget.getVersionedChainId(), io.chunkId};
     updateIO.updateType = UpdateType::WRITE;
-    // 填充 NDS 字段
-    memcpy(updateIO.ndsEid.data(), io.segInfo.eid, 16);
-    updateIO.ndsUasid = io.segInfo.uasid;
-    updateIO.ndsJettyId = io.segInfo.jetty_id;
-    updateIO.ndsTokenId = io.segInfo.token_id;
+    // 填充 NDS 双段字段
+    updateIO.npuNodeId = io.npuNodeId;
+    memcpy(updateIO.ndsH2dEid.data(), io.h2dSegInfo.eid, 16);
+    updateIO.ndsH2dUasid = io.h2dSegInfo.uasid;
+    updateIO.ndsH2dJettyId = io.h2dSegInfo.jetty_id;
+    updateIO.ndsH2dTokenId = io.h2dSegInfo.token_id;
+    memcpy(updateIO.ndsRh2dEid.data(), io.rh2dSegInfo.eid, 16);
+    updateIO.ndsRh2dUasid = io.rh2dSegInfo.uasid;
+    updateIO.ndsRh2dJettyId = io.rh2dSegInfo.jetty_id;
+    updateIO.ndsRh2dTokenId = io.rh2dSegInfo.token_id;
     updateIO.ndsBufAddr = (uint64_t)io.ndsBufAddr;
     updateIO.ndsBufSize = io.ndsBufSize;
 

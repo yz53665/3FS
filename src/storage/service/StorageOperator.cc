@@ -146,6 +146,7 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
 
   // NPU 直通读：提前处理，跳过 RDMA buffer 分配 + AIO + RDMA write
   if (isNpuDirect) {
+    bool isLocalNpu = (req.payloads.empty() ? false : req.payloads[0].npuNodeId == components_.getAppInfo().nodeId.toUnderType());
     for (AioReadJobIterator it(&batch); it; it++) {
       const auto &readIO = it->readIO();
       auto target = it->state().storageTarget;
@@ -158,10 +159,17 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
       }
 
       nds_segment_info_t segInfo;
-      memcpy(segInfo.eid, readIO.ndsEid.data(), 16);
-      segInfo.uasid = readIO.ndsUasid;
-      segInfo.jetty_id = readIO.ndsJettyId;
-      segInfo.token_id = readIO.ndsTokenId;
+      if (isLocalNpu) {
+        memcpy(segInfo.eid, readIO.ndsH2dEid.data(), 16);
+        segInfo.uasid = readIO.ndsH2dUasid;
+        segInfo.jetty_id = readIO.ndsH2dJettyId;
+        segInfo.token_id = readIO.ndsH2dTokenId;
+      } else {
+        memcpy(segInfo.eid, readIO.ndsRh2dEid.data(), 16);
+        segInfo.uasid = readIO.ndsRh2dUasid;
+        segInfo.jetty_id = readIO.ndsRh2dJettyId;
+        segInfo.token_id = readIO.ndsRh2dTokenId;
+      }
 
       auto ndsHandle = components_.ndsCache.getOrRegister(*fdResult);
 
@@ -589,11 +597,20 @@ CoTask<IOResult> StorageOperator::doUpdate(ServiceRequestContext &requestCtx,
       co_return makeError(std::move(fdResult.error()));
     }
 
+    bool isLocalNpu = (updateIO.npuNodeId == components_.getAppInfo().nodeId.toUnderType());
+
     nds_segment_info_t segInfo;
-    memcpy(segInfo.eid, updateIO.ndsEid.data(), 16);
-    segInfo.uasid = updateIO.ndsUasid;
-    segInfo.jetty_id = updateIO.ndsJettyId;
-    segInfo.token_id = updateIO.ndsTokenId;
+    if (isLocalNpu) {
+      memcpy(segInfo.eid, updateIO.ndsH2dEid.data(), 16);
+      segInfo.uasid = updateIO.ndsH2dUasid;
+      segInfo.jetty_id = updateIO.ndsH2dJettyId;
+      segInfo.token_id = updateIO.ndsH2dTokenId;
+    } else {
+      memcpy(segInfo.eid, updateIO.ndsRh2dEid.data(), 16);
+      segInfo.uasid = updateIO.ndsRh2dUasid;
+      segInfo.jetty_id = updateIO.ndsRh2dJettyId;
+      segInfo.token_id = updateIO.ndsRh2dTokenId;
+    }
 
     auto ndsHandle = components_.ndsCache.getOrRegister(*fdResult);
 

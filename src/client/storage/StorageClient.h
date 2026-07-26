@@ -164,7 +164,8 @@ class NpuDirectReadIO : public folly::MoveOnly {
                   const ChunkId &chunkId,
                   uint32_t offset,
                   uint32_t length,
-                  const nds_segment_info_t &segInfo,
+                  const nds_segment_info_t &h2dSegInfo,
+                  const nds_segment_info_t &rh2dSegInfo,
                   uint8_t *ndsBufAddr,
                   uint64_t ndsBufSize,
                   void *userCtx)
@@ -172,7 +173,8 @@ class NpuDirectReadIO : public folly::MoveOnly {
         chunkId(chunkId),
         offset(offset),
         length(length),
-        segInfo(segInfo),
+        h2dSegInfo(h2dSegInfo),
+        rh2dSegInfo(rh2dSegInfo),
         ndsBufAddr(ndsBufAddr),
         ndsBufSize(ndsBufSize),
         userCtx(userCtx) {}
@@ -186,7 +188,9 @@ class NpuDirectReadIO : public folly::MoveOnly {
   ChunkId chunkId;
   uint32_t offset;
   uint32_t length;
-  nds_segment_info_t segInfo;
+  nds_segment_info_t h2dSegInfo;
+  nds_segment_info_t rh2dSegInfo;
+  uint32_t npuNodeId;
   uint8_t *ndsBufAddr;
   uint64_t ndsBufSize;
   void *userCtx;
@@ -202,7 +206,8 @@ class NpuDirectWriteIO : public folly::MoveOnly {
                    uint32_t offset,
                    uint32_t length,
                    uint32_t chunkSize,
-                   const nds_segment_info_t &segInfo,
+                   const nds_segment_info_t &h2dSegInfo,
+                   const nds_segment_info_t &rh2dSegInfo,
                    uint8_t *ndsBufAddr,
                    uint64_t ndsBufSize,
                    void *userCtx)
@@ -212,7 +217,8 @@ class NpuDirectWriteIO : public folly::MoveOnly {
         offset(offset),
         length(length),
         chunkSize(chunkSize),
-        segInfo(segInfo),
+        h2dSegInfo(h2dSegInfo),
+        rh2dSegInfo(rh2dSegInfo),
         ndsBufAddr(ndsBufAddr),
         ndsBufSize(ndsBufSize),
         userCtx(userCtx) {}
@@ -228,7 +234,9 @@ class NpuDirectWriteIO : public folly::MoveOnly {
   uint32_t offset;
   uint32_t length;
   uint32_t chunkSize;
-  nds_segment_info_t segInfo;
+  nds_segment_info_t h2dSegInfo;
+  nds_segment_info_t rh2dSegInfo;
+  uint32_t npuNodeId;
   uint8_t *ndsBufAddr;
   uint64_t ndsBufSize;
   void *userCtx;
@@ -558,7 +566,8 @@ class StorageClient : public folly::MoveOnly {
                                                 const ChunkId &chunkId,
                                                 uint32_t offset,
                                                 uint32_t length,
-                                                const nds_segment_info_t &segInfo,
+                                                const nds_segment_info_t &h2dSegInfo,
+                                                const nds_segment_info_t &rh2dSegInfo,
                                                 uint8_t *ndsBufAddr,
                                                 uint64_t ndsBufSize,
                                                 void *userCtx = nullptr);
@@ -569,7 +578,8 @@ class StorageClient : public folly::MoveOnly {
                                                   uint32_t offset,
                                                   uint32_t length,
                                                   uint32_t chunkSize,
-                                                  const nds_segment_info_t &segInfo,
+                                                  const nds_segment_info_t &h2dSegInfo,
+                                                  const nds_segment_info_t &rh2dSegInfo,
                                                   uint8_t *ndsBufAddr,
                                                   uint64_t ndsBufSize,
                                                   void *userCtx = nullptr);

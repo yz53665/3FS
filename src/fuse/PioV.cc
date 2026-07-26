@@ -189,7 +189,8 @@ hf3fs::Result<Void> PioV::addNpuDirectRead(size_t idx,
                                            uint16_t track,
                                            off_t off,
                                            size_t len,
-                                           const nds_segment_info_t *segInfo,
+                                           const nds_segment_info_t *h2dSegInfo,
+                                           const nds_segment_info_t *rh2dSegInfo,
                                            void *ndsBufAddr,
                                            uint64_t ndsBufSize) {
   if (!npuWios_.empty()) {
@@ -207,13 +208,13 @@ hf3fs::Result<Void> PioV::addNpuDirectRead(size_t idx,
                           track,
                           off,
                           len,
-                          [this, segInfo, ndsBufAddr, ndsBufSize, idx](storage::ChainId chain,
+                          [this, h2dSegInfo, rh2dSegInfo, ndsBufAddr, ndsBufSize, idx](storage::ChainId chain,
                                                                         storage::ChunkId chunk,
                                                                         uint32_t,
                                                                         uint32_t chunkOff,
                                                                         uint32_t chunkLen) {
                             npuRios_.emplace_back(storageClient_.createNpuDirectReadIO(
-                                chain, chunk, chunkOff, chunkLen, *segInfo,
+                                chain, chunk, chunkOff, chunkLen, *h2dSegInfo, *rh2dSegInfo,
                                 (uint8_t *)ndsBufAddr, ndsBufSize, reinterpret_cast<void *>(idx)));
                           }));
 
@@ -225,7 +226,8 @@ hf3fs::Result<Void> PioV::addNpuDirectWrite(size_t idx,
                                             uint16_t track,
                                             off_t off,
                                             size_t len,
-                                            const nds_segment_info_t *segInfo,
+                                            const nds_segment_info_t *h2dSegInfo,
+                                            const nds_segment_info_t *rh2dSegInfo,
                                             void *ndsBufAddr,
                                             uint64_t ndsBufSize) {
   if (!npuRios_.empty()) {
@@ -243,13 +245,13 @@ hf3fs::Result<Void> PioV::addNpuDirectWrite(size_t idx,
                           track,
                           off,
                           len,
-                          [this, segInfo, ndsBufAddr, ndsBufSize, idx](storage::ChainId chain,
+                          [this, h2dSegInfo, rh2dSegInfo, ndsBufAddr, ndsBufSize, idx](storage::ChainId chain,
                                                                         storage::ChunkId chunk,
                                                                         uint32_t chunkSize,
                                                                         uint32_t chunkOff,
                                                                         uint32_t chunkLen) {
                             npuWios_.emplace_back(storageClient_.createNpuDirectWriteIO(
-                                chain, chunk, chunkOff, chunkLen, chunkSize, *segInfo,
+                                chain, chunk, chunkOff, chunkLen, chunkSize, *h2dSegInfo, *rh2dSegInfo,
                                 (uint8_t *)ndsBufAddr, ndsBufSize, reinterpret_cast<void *>(idx)));
                           }));
 
@@ -270,6 +272,15 @@ CoTryTask<void> PioV::executeNpuDirectWrite(const UserInfo &userInfo, const stor
     co_return Void{};
   }
   co_return co_await storageClient_.batchNpuDirectWrite(npuWios_, userInfo, options);
+}
+
+void PioV::setNpuNodeId(uint32_t nodeId) {
+  for (auto &io : npuRios_) {
+    io.npuNodeId = nodeId;
+  }
+  for (auto &io : npuWios_) {
+    io.npuNodeId = nodeId;
+  }
 }
 
 template <typename Io>

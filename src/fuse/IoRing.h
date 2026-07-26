@@ -25,13 +25,17 @@ struct IoArgs {
 
   const void *userdata;
 
-  // === NPU 直通字段 ===
+  // === NPU 直通双段字段 (h2d = 近端同机, rh2d = 远端跨机) ===
   bool isNpuDirect;
   uint8_t reserved[7];           // 对齐填充
-  uint8_t ndsEid[16];            // NDS endpoint identifier
-  uint32_t ndsUasid;             // NDS user ASID
-  uint32_t ndsJettyId;           // NDS jetty ID
-  uint32_t ndsTokenId;           // NDS token ID
+  uint8_t ndsH2dEid[16];         // NDS h2d endpoint identifier
+  uint32_t ndsH2dUasid;          // NDS h2d user ASID
+  uint32_t ndsH2dJettyId;        // NDS h2d jetty ID
+  uint32_t ndsH2dTokenId;        // NDS h2d token ID
+  uint8_t ndsRh2dEid[16];        // NDS rh2d endpoint identifier
+  uint32_t ndsRh2dUasid;         // NDS rh2d user ASID
+  uint32_t ndsRh2dJettyId;       // NDS rh2d jetty ID
+  uint32_t ndsRh2dTokenId;       // NDS rh2d token ID
   uint64_t ndsBufAddr;           // NPU HBM 物理地址
   uint64_t ndsBufSize;           // HBM buffer 大小
 };
@@ -115,7 +119,8 @@ class IoRing : public std::enable_shared_from_this<IoRing> {
         shm_(std::move(shm)),
         userInfo_(ui),
         forRead_(read),
-        flags_(flags) {
+        flags_(flags),
+        npuNodeId_(0) {
     XLOGF_IF(FATAL,
              (uintptr_t)(sqeSection + entries + sizeof(sem_t)) > (uintptr_t)(buf + size),
              "sem has a bad address {}, after whole shm starts at {} with {} bytes",
@@ -174,6 +179,7 @@ class IoRing : public std::enable_shared_from_this<IoRing> {
   int ioDepth;
   int priority;
   Duration timeout;
+  uint32_t npuNodeId_;  // NPU 所在节点 ID，由 FUSE daemon 设置
 
  private:
   int32_t *sqeHead_;
@@ -255,13 +261,16 @@ struct IoRingTable {
     auto ior = std::make_shared<
         IoRing>(std::move(shm), name, ui, forRead, buf, size, ioDepth, attrs.priority, attrs.timeout, attrs.flags);
     ior->mountName = mountName.native();
+    ior->npuNodeId_ = npuNodeId_;
     ioRings->table[idx].store(ior);
 
     return idx;
   }
   void rmIoRing(int idx) { ioRings->remove(idx); }
+  void setNpuNodeId(uint32_t nodeId) { npuNodeId_ = nodeId; }
   std::vector<std::unique_ptr<sem_t, std::function<void(sem_t *)>>> sems;
   std::unique_ptr<AtomicSharedPtrTable<IoRing>> ioRings;
+  uint32_t npuNodeId_ = 0;
 
  private:
   static std::string semOpenPath(int prio) {

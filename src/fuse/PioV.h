@@ -45,7 +45,8 @@ class PioV {
                                        uint16_t track,
                                        off_t off,
                                        size_t len,
-                                       const nds_segment_info_t *segInfo,
+                                       const nds_segment_info_t *h2dSegInfo,
+                                       const nds_segment_info_t *rh2dSegInfo,
                                        void *ndsBufAddr,
                                        uint64_t ndsBufSize);
   hf3fs::Result<Void> addNpuDirectWrite(size_t idx,
@@ -53,7 +54,8 @@ class PioV {
                                         uint16_t track,
                                         off_t off,
                                         size_t len,
-                                        const nds_segment_info_t *segInfo,
+                                        const nds_segment_info_t *h2dSegInfo,
+                                        const nds_segment_info_t *rh2dSegInfo,
                                         void *ndsBufAddr,
                                         uint64_t ndsBufSize);
   CoTryTask<void> executeNpuDirectRead(const UserInfo &userInfo,
@@ -61,6 +63,7 @@ class PioV {
   CoTryTask<void> executeNpuDirectWrite(const UserInfo &userInfo,
                                         const storage::client::WriteOptions &options = storage::client::WriteOptions());
   bool hasNpuDirectIO() const { return !npuRios_.empty() || !npuWios_.empty(); }
+  void setNpuNodeId(uint32_t nodeId);
 
  private:
   Result<Void> chunkIo(

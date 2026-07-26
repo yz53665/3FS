@@ -118,6 +118,7 @@ CoTask<void> IoRing::process(
     }
 
     lib::agent::PioV ioExec(storageClient, config.chunk_size_limit(), res);
+    ioExec.setNpuNodeId(npuNodeId_);
     std::vector<uint64_t> truncateVers;
     if (!forRead_) {
       truncateVers.resize(toProc, 0);
@@ -158,17 +159,23 @@ CoTask<void> IoRing::process(
           truncateVers[i] = *beginWrite;
         }
 
-        nds_segment_info_t segInfo;
-        memcpy(segInfo.eid, args.ndsEid, sizeof(segInfo.eid));
-        segInfo.uasid = args.ndsUasid;
-        segInfo.jetty_id = args.ndsJettyId;
-        segInfo.token_id = args.ndsTokenId;
+        nds_segment_info_t h2dSegInfo;
+        memcpy(h2dSegInfo.eid, args.ndsH2dEid, sizeof(h2dSegInfo.eid));
+        h2dSegInfo.uasid = args.ndsH2dUasid;
+        h2dSegInfo.jetty_id = args.ndsH2dJettyId;
+        h2dSegInfo.token_id = args.ndsH2dTokenId;
+
+        nds_segment_info_t rh2dSegInfo;
+        memcpy(rh2dSegInfo.eid, args.ndsRh2dEid, sizeof(rh2dSegInfo.eid));
+        rh2dSegInfo.uasid = args.ndsRh2dUasid;
+        rh2dSegInfo.jetty_id = args.ndsRh2dJettyId;
+        rh2dSegInfo.token_id = args.ndsRh2dTokenId;
 
         auto addRes = forRead_
             ? ioExec.addNpuDirectRead(i, inodes[i]->inode, 0, args.fileOff, args.ioLen,
-                                      &segInfo, (void *)args.ndsBufAddr, args.ndsBufSize)
+                                      &h2dSegInfo, &rh2dSegInfo, (void *)args.ndsBufAddr, args.ndsBufSize)
             : ioExec.addNpuDirectWrite(i, inodes[i]->inode, 0, args.fileOff, args.ioLen,
-                                       &segInfo, (void *)args.ndsBufAddr, args.ndsBufSize);
+                                       &h2dSegInfo, &rh2dSegInfo, (void *)args.ndsBufAddr, args.ndsBufSize);
         if (!addRes) {
           res[i] = -static_cast<ssize_t>(addRes.error().code());
         }

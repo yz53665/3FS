@@ -71,11 +71,12 @@ NpuDirectReadIO StorageClient::createNpuDirectReadIO(ChainId chainId,
                                                      const ChunkId &chunkId,
                                                      uint32_t offset,
                                                      uint32_t length,
-                                                     const nds_segment_info_t &segInfo,
+                                                     const nds_segment_info_t &h2dSegInfo,
+                                                     const nds_segment_info_t &rh2dSegInfo,
                                                      uint8_t *ndsBufAddr,
                                                      uint64_t ndsBufSize,
                                                      void *userCtx) {
-  return NpuDirectReadIO(chainId, chunkId, offset, length, segInfo, ndsBufAddr, ndsBufSize, userCtx);
+  return NpuDirectReadIO(chainId, chunkId, offset, length, h2dSegInfo, rh2dSegInfo, ndsBufAddr, ndsBufSize, userCtx);
 }
 
 NpuDirectWriteIO StorageClient::createNpuDirectWriteIO(ChainId chainId,
@@ -83,13 +84,14 @@ NpuDirectWriteIO StorageClient::createNpuDirectWriteIO(ChainId chainId,
                                                        uint32_t offset,
                                                        uint32_t length,
                                                        uint32_t chunkSize,
-                                                       const nds_segment_info_t &segInfo,
+                                                       const nds_segment_info_t &h2dSegInfo,
+                                                       const nds_segment_info_t &rh2dSegInfo,
                                                        uint8_t *ndsBufAddr,
                                                        uint64_t ndsBufSize,
                                                        void *userCtx) {
   RequestId requestId(nextRequestId_.fetch_add(1));
   return NpuDirectWriteIO(requestId, chainId, chunkId, offset, length, chunkSize,
-                          segInfo, ndsBufAddr, ndsBufSize, userCtx);
+                          h2dSegInfo, rh2dSegInfo, ndsBufAddr, ndsBufSize, userCtx);
 }
 
 QueryLastChunkOp StorageClient::createQueryOp(ChainId chainId,

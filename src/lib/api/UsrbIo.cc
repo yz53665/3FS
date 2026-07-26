@@ -705,7 +705,7 @@ int hf3fs_prep_npu_direct_io(const struct hf3fs_ior *ior,
     return -EAGAIN;
   }
 
-  auto *segInfo = static_cast<nds_segment_info_t *>(nds_segment_info);
+  auto *segInfos = static_cast<nds_segment_infos_t *>(nds_segment_info);
 
   auto &args = ring.ringSection[*idx];
   // 填充文件信息（同普通模式）
@@ -714,12 +714,16 @@ int hf3fs_prep_npu_direct_io(const struct hf3fs_ior *ior,
   args.ioLen = len;
   args.userdata = userdata;
 
-  // 填充 NPU 直通信息
+  // 填充 NPU 直通双段信息
   args.isNpuDirect = true;
-  memcpy(args.ndsEid, segInfo->eid, sizeof(segInfo->eid));
-  args.ndsUasid = segInfo->uasid;
-  args.ndsJettyId = segInfo->jetty_id;
-  args.ndsTokenId = segInfo->token_id;
+  memcpy(args.ndsH2dEid, segInfos->h2d_segment.eid, sizeof(segInfos->h2d_segment.eid));
+  args.ndsH2dUasid = segInfos->h2d_segment.uasid;
+  args.ndsH2dJettyId = segInfos->h2d_segment.jetty_id;
+  args.ndsH2dTokenId = segInfos->h2d_segment.token_id;
+  memcpy(args.ndsRh2dEid, segInfos->rh2d_segment.eid, sizeof(segInfos->rh2d_segment.eid));
+  args.ndsRh2dUasid = segInfos->rh2d_segment.uasid;
+  args.ndsRh2dJettyId = segInfos->rh2d_segment.jetty_id;
+  args.ndsRh2dTokenId = segInfos->rh2d_segment.token_id;
   args.ndsBufAddr = (uint64_t)nds_buf_addr;
   args.ndsBufSize = nds_buf_size;
 

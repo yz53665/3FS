@@ -312,11 +312,16 @@ struct ReadIO {
   SERDE_STRUCT_FIELD(length, uint32_t{});
   SERDE_STRUCT_FIELD(key, GlobalKey{});
   SERDE_STRUCT_FIELD(rdmabuf, net::RDMARemoteBuf{});
-  // NDS 直通字段
-  SERDE_STRUCT_FIELD(ndsEid, std::array<uint8_t, 16>{});
-  SERDE_STRUCT_FIELD(ndsUasid, uint32_t{});
-  SERDE_STRUCT_FIELD(ndsJettyId, uint32_t{});
-  SERDE_STRUCT_FIELD(ndsTokenId, uint32_t{});
+  // NDS 直通双段字段 (h2d = 近端同机, rh2d = 远端跨机)
+  SERDE_STRUCT_FIELD(npuNodeId, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsH2dEid, std::array<uint8_t, 16>{});
+  SERDE_STRUCT_FIELD(ndsH2dUasid, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsH2dJettyId, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsH2dTokenId, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsRh2dEid, std::array<uint8_t, 16>{});
+  SERDE_STRUCT_FIELD(ndsRh2dUasid, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsRh2dJettyId, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsRh2dTokenId, uint32_t{});
   SERDE_STRUCT_FIELD(ndsBufAddr, uint64_t{});
   SERDE_STRUCT_FIELD(ndsBufSize, uint64_t{});
 };
@@ -341,11 +346,16 @@ struct UpdateIO {
   SERDE_STRUCT_FIELD(updateType, UpdateType{});
   SERDE_STRUCT_FIELD(checksum, ChecksumInfo{});
   SERDE_STRUCT_FIELD(inlinebuf, UInt8Vector{});
-  // NDS 直通字段
-  SERDE_STRUCT_FIELD(ndsEid, std::array<uint8_t, 16>{});
-  SERDE_STRUCT_FIELD(ndsUasid, uint32_t{});
-  SERDE_STRUCT_FIELD(ndsJettyId, uint32_t{});
-  SERDE_STRUCT_FIELD(ndsTokenId, uint32_t{});
+  // NDS 直通双段字段 (h2d = 近端同机, rh2d = 远端跨机)
+  SERDE_STRUCT_FIELD(npuNodeId, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsH2dEid, std::array<uint8_t, 16>{});
+  SERDE_STRUCT_FIELD(ndsH2dUasid, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsH2dJettyId, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsH2dTokenId, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsRh2dEid, std::array<uint8_t, 16>{});
+  SERDE_STRUCT_FIELD(ndsRh2dUasid, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsRh2dJettyId, uint32_t{});
+  SERDE_STRUCT_FIELD(ndsRh2dTokenId, uint32_t{});
   SERDE_STRUCT_FIELD(ndsBufAddr, uint64_t{});
   SERDE_STRUCT_FIELD(ndsBufSize, uint64_t{});
 

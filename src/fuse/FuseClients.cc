@@ -87,6 +87,7 @@ Result<Void> FuseClients::init(const flat::AppInfo &appInfo,
 
   iovs.init(fuseRemountPref.value_or(fuseMountpoint), fuseConfig.iov_limit());
   iors.init(fuseConfig.iov_limit());
+  iors.setNpuNodeId(appInfo.nodeId.toUnderType());
   userConfig.init(fuseConfig);
 
   if (!client) {
