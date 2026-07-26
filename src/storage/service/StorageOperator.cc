@@ -96,6 +96,8 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
   storageReadCount.addSample(batchSize);
   storageReqReadSize.addSample(batchSize);
 
+  bool isNpuDirect = BITFLAGS_CONTAIN(req.featureFlags, FeatureFlags::NPU_DIRECT_IO);
+
   size_t totalLength = 0;
   size_t totalHeadLength = 0;
   size_t totalTailLength = 0;
@@ -120,13 +122,18 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
     totalLength += it->readIO().length;
     totalHeadLength += it->state().headLength;
     totalTailLength += it->state().tailLength;
-    if (FAULT_INJECTION_POINT(requestCtx.debugFlags.injectServerError(),
-                              true,
-                              UNLIKELY(it->readIO().length > it->readIO().rdmabuf.size()))) {
-      auto msg = fmt::format("invalid read buffer size {}", it->readIO());
-      XLOG(ERR, msg);
-      co_return makeError(StatusCode::kInvalidArg, std::move(msg));
+
+    // NDS 直通读不依赖 RDMA buffer，跳过 rdmabuf 校验
+    if (!isNpuDirect) {
+      if (FAULT_INJECTION_POINT(requestCtx.debugFlags.injectServerError(),
+                                true,
+                                UNLIKELY(it->readIO().length > it->readIO().rdmabuf.size()))) {
+        auto msg = fmt::format("invalid read buffer size {}", it->readIO());
+        XLOG(ERR, msg);
+        co_return makeError(StatusCode::kInvalidArg, std::move(msg));
+      }
     }
+
     it->state().readUncommitted = BITFLAGS_CONTAIN(req.featureFlags, FeatureFlags::ALLOW_READ_UNCOMMITTED);
   }
   totalReadBytes_ += totalLength;
@@ -137,26 +144,8 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
   aioTotalAlignedLength.addSample(totalLength + totalHeadLength + totalTailLength);
   prepareTargetRecordGuard.report(true);
 
-  auto prepareBufferRecordGuard = storageReadPrepareBuffer.record();
-  auto buffer = components_.rdmabufPool.get();
-  for (AioReadJobIterator it(&batch); it; it++) {
-    auto &job = *it;
-    auto allocateResult = buffer.tryAllocate(job.alignedLength());
-    if (UNLIKELY(!allocateResult)) {
-      allocateResult = co_await buffer.allocate(job.alignedLength());
-    }
-    if (UNLIKELY(!allocateResult)) {
-      auto msg = fmt::format("read allocate buffer failed, req {}, length {}", job.readIO(), job.alignedLength());
-      XLOG(ERR, msg);
-      co_return makeError(RPCCode::kRDMANoBuf, std::move(msg));
-    }
-    job.state().localbuf = std::move(*allocateResult);
-    job.state().bufferIndex = buffer.index();
-  }
-  prepareBufferRecordGuard.report(true);
-
-  if (BITFLAGS_CONTAIN(req.featureFlags, FeatureFlags::NPU_DIRECT_IO)) {
-    // NPU 直通读：跳过 AIO + RDMA write，直接 NDS 读取
+  // NPU 直通读：提前处理，跳过 RDMA buffer 分配 + AIO + RDMA write
+  if (isNpuDirect) {
     for (AioReadJobIterator it(&batch); it; it++) {
       const auto &readIO = it->readIO();
       auto target = it->state().storageTarget;
@@ -193,11 +182,28 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
       batch.finish(&*it);
     }
 
-    // 跳过后续 AIO + RDMA 路径
     co_await batch.complete();
     recordGuard.succ();
     co_return rsp;
   }
+
+  auto prepareBufferRecordGuard = storageReadPrepareBuffer.record();
+  auto buffer = components_.rdmabufPool.get();
+  for (AioReadJobIterator it(&batch); it; it++) {
+    auto &job = *it;
+    auto allocateResult = buffer.tryAllocate(job.alignedLength());
+    if (UNLIKELY(!allocateResult)) {
+      allocateResult = co_await buffer.allocate(job.alignedLength());
+    }
+    if (UNLIKELY(!allocateResult)) {
+      auto msg = fmt::format("read allocate buffer failed, req {}, length {}", job.readIO(), job.alignedLength());
+      XLOG(ERR, msg);
+      co_return makeError(RPCCode::kRDMANoBuf, std::move(msg));
+    }
+    job.state().localbuf = std::move(*allocateResult);
+    job.state().bufferIndex = buffer.index();
+  }
+  prepareBufferRecordGuard.report(true);
 
   if (BITFLAGS_CONTAIN(req.featureFlags, FeatureFlags::BYPASS_DISKIO)) {
     for (AioReadJobIterator it(&batch); it; it++) {

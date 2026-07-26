@@ -87,6 +87,8 @@ flowchart TD
 
 ## 2. 端到端调用路径
 
+### 2.1 NPU 直通读流程
+
 ```mermaid
 sequenceDiagram
     participant APP as 用户进程 (NPU)
@@ -96,10 +98,7 @@ sequenceDiagram
     participant PIOV as PioV
     participant SC as StorageClient
     participant HEAD as Storage Server (Head)
-    participant SUCC as Storage Server (Successor)
     participant NDS as NDS 硬件
-
-    Note over APP,NDS: === NPU 直通读流程 ===
 
     APP->>LIB: hf3fs_prep_npu_direct_io(ior, read=true, fd, off, len, segInfo, hbmAddr, hbmSize, userdata)
     LIB->>LIB: 校验 fd 注册状态、读写权限
@@ -132,8 +131,21 @@ sequenceDiagram
 
     APP->>LIB: hf3fs_wait_for_ios(ior, cqes, ...)
     LIB-->>APP: 返回完成结果
+```
 
-    Note over APP,NDS: === NPU 直通写流程（全 NDS 链路） ===
+### 2.2 NPU 直通写流程（全 NDS 链路）
+
+```mermaid
+sequenceDiagram
+    participant APP as 用户进程 (NPU)
+    participant LIB as lib/api (UsrbIo.cc)
+    participant IORING as IoRing (共享内存)
+    participant FUSE as FUSE Daemon
+    participant PIOV as PioV
+    participant SC as StorageClient
+    participant HEAD as Storage Server (Head)
+    participant SUCC as Storage Server (Successor)
+    participant NDS as NDS 硬件
 
     APP->>LIB: hf3fs_prep_npu_direct_io(ior, read=false, fd, off, len, segInfo, hbmAddr, hbmSize, userdata)
     LIB->>IORING: 同上，填充 IoArgs{isNpuDirect=true, ...}
