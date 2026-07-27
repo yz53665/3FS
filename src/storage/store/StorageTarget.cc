@@ -450,7 +450,7 @@ Result<int> StorageTarget::getChunkFd(const ChunkId &chunkId) {
   auto chunkResult = chunkStore_.get(chunkId);
   RETURN_ON_ERROR(chunkResult);
   auto &view = (*chunkResult)->second.view;
-  return view.normal_;
+  return view.normalFD();
 }
 
 }  // namespace hf3fs::storage

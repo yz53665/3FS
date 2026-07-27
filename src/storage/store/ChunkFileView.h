@@ -21,6 +21,9 @@ class ChunkFileView {
   // get direct fd for aio read.
   int directFD() const { return direct_; }
 
+  // get normal fd for NDS direct IO.
+  int normalFD() const { return normal_; }
+
   // get fd index in list.
   auto &index() const { return index_; }
 
