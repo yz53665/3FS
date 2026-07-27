@@ -170,6 +170,9 @@ TARGET_INCLUDE_DIRECTORIES (absl-lib
 restore_compile_flags()
 add_subdirectory("third_party/liburing-cmake" EXCLUDE_FROM_ALL)
 restore_compile_flags()
+store_compile_flags()
+add_subdirectory("third_party/CCDK/nds" EXCLUDE_FROM_ALL)
+restore_compile_flags()
 
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror -Wpedantic")
 
