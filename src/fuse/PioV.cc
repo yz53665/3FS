@@ -368,7 +368,7 @@ void concatIoRes(bool read, std::vector<ssize_t> &res, const Io &ios, bool allow
 
 void PioV::finishIo(bool allowHoles) {
   if (!npuRios_.empty()) {
-    concatIoRes(true, res_, npuRios_, allowHoles);
+    concatIoRes(true, res_, npuRios_, false);
   } else if (!npuWios_.empty()) {
     concatIoRes(false, res_, npuWios_, false);
   } else if (wios_.empty()) {
