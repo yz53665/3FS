@@ -312,6 +312,10 @@ Result<std::vector<IBDevice::Ptr>> IBDevice::openAll(const IBConfig &config) {
   int deviceCnt = 0;
   auto deviceList = ibv_get_device_list(&deviceCnt);
   if (deviceList == nullptr) {
+    if (config.allow_no_usable_devices()) {
+      XLOGF(WARN, "Failed to load verbs device list, but allow_no_usable_devices is set, continue.");
+      return std::vector<IBDevice::Ptr>{};
+    }
     XLOGF(ERR, "Failed to load verbs device list, errno {}", errno);
     return makeError(RPCCode::kIBInitFailed, "Failed to load verbs devices.");
   }
