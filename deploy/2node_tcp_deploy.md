@@ -25,7 +25,19 @@
 - **机器 A**：运行 MGMTD、Meta、Storage、FUSE 客户端
 - **机器 B**：运行 Storage、FUSE 客户端
 - 所有通信通过 **TCP 协议**，无需 RDMA 硬件
-- 数据存储使用 **memkv**（内存 KV），无需 FoundationDB
+- 集群元数据存储使用 **FoundationDB**
+
+---
+
+## 配置文件说明
+
+每个组件使用三个配置文件（位于 `/opt/3fs/config/`）：
+
+| 文件 | 作用 | 核心内容 |
+|------|------|----------|
+| `*_main.toml` | 通用配置 | 集群标识、客户端网络、`[ib_devices]`、`[mgmtd]`/`[mgmtd_client]`、`[client]` |
+| `*_main_launcher.toml` | 启动器配置 | `node_id`、`allow_empty_node_id`（仅此两个变量） |
+| `*_main_app.toml` | 应用/服务端配置 | 日志、线程池、监听端口、业务逻辑参数 |
 
 ---
 
@@ -50,7 +62,25 @@ make -j$(nproc)
 - `hf3fs_fuse_main` — FUSE 客户端
 - `admin_cli` — 管理命令行工具
 
-### 2. 创建目录结构
+### 2. 安装 FoundationDB（仅机器 A）
+
+```bash
+# 添加 FDB 仓库并安装
+# Ubuntu/Debian:
+wget https://github.com/apple/foundationdb/releases/download/7.1.64/foundationdb-clients_7.1.64-1_amd64.deb
+wget https://github.com/apple/foundationdb/releases/download/7.1.64/foundationdb-server_7.1.64-1_amd64.deb
+sudo dpkg -i foundationdb-clients_7.1.64-1_amd64.deb foundationdb-server_7.1.64-1_amd64.deb
+
+# 验证
+fdbcli --exec "status minimal"
+
+# 单机内存模式，测试用
+fdbcli --exec "configure new single memory"
+```
+
+> FoundationDB 只需在机器 A 部署，其他节点通过 MGMTD 的 FDB 客户端连接即可。
+
+### 3. 创建目录结构
 
 ```bash
 # 两台机器都执行
@@ -69,7 +99,7 @@ sudo cp build/bin/admin_cli /opt/3fs/bin/
 sudo cp configs/*.toml /opt/3fs/config/
 ```
 
-### 3. 确保网络互通
+### 4. 确保网络互通
 
 ```bash
 # 机器 A 上 ping 机器 B
@@ -86,41 +116,61 @@ netstat -tlnp | grep -E '800[0-9]|900[0-9]'
 
 ## 第一步：配置 MGMTD（机器 A）
 
-### 1.1 修改 `/opt/3fs/config/mgmtd_main_launcher.toml`
+### 1.1 修改 `/opt/3fs/config/mgmtd_main.toml`
 
 ```toml
 allow_dev_version = true
 cluster_id = 'mycluster'
-use_memkv = true                    # 使用内存 KV，不依赖 FDB
 
-[mgmtd_client]
-mgmtd_server_addresses = ['TCP://192.168.1.10:8000']
+# FDB 连接配置
+[fdb]
+clusterFile = '/etc/foundationdb/fdb.cluster'
+
+# 也可以使用 KV 引擎配置方式
+[kv_engine]
+use_memkv = false
+[kv_engine.fdb]
+clusterFile = '/etc/foundationdb/fdb.cluster'
+
+# 允许无 RDMA 设备（TCP-only）
+[ib_devices]
+allow_no_usable_devices = true
 ```
 
-### 1.2 修改 `/opt/3fs/config/mgmtd_main_app.toml`
+### 1.2 修改 `/opt/3fs/config/mgmtd_main_launcher.toml`
 
 ```toml
 allow_empty_node_id = false
-node_id = 1                         # MGMTD 固定使用 NodeId=1
+node_id = 1            # MGMTD 固定使用 NodeId=1
 ```
 
-### 1.3 修改 `/opt/3fs/config/mgmtd_main.toml`
+### 1.3 修改 `/opt/3fs/config/mgmtd_main_app.toml`
 
-在 `[server]` 段下添加 TCP 配置，并允许无 IB 设备：
+将 `[[server.base.groups]]` 中的服务组改为 TCP：
 
 ```toml
-# 关键：允许无 IB 设备
-[ib_devices]
-allow_no_usable_devices = true
+# 第一个服务组：Mgmtd 业务 → TCP
+[[server.base.groups]]
+services = ['Mgmtd']
+network_type = "TCP"                  # 改为 TCP
+[server.base.groups.listener]
+listen_port = 8000
+# ... 其余子配置保持模板不变 ...
 
-# 服务端监听改为 TCP
-[server.groups.0]
-network_type = "TCP"
-services = ["Mgmtd"]
+# 第二个服务组：Core → TCP
+[[server.base.groups]]
+services = ['Core']
+network_type = "TCP"                  # 改为 TCP
+[server.base.groups.listener]
+listen_port = 9000
+# ... 其余子配置保持模板不变 ...
+```
 
-[server.groups.1]
-network_type = "TCP"
-services = ["Core"]
+同时添加客户端 TCP 配置：
+
+```toml
+[server.client]
+force_use_tcp = true
 ```
 
 ### 1.4 启动 MGMTD
@@ -146,33 +196,69 @@ tail -f /var/log/3fs/mgmtd_main.log
 
 ## 第二步：配置 Meta（机器 A）
 
-### 2.1 修改 `/opt/3fs/config/meta_main_launcher.toml`
+### 2.1 修改 `/opt/3fs/config/meta_main.toml`
 
 ```toml
 allow_dev_version = true
 cluster_id = 'mycluster'
 
+# 客户端出站连接走 TCP
+[client]
+force_use_tcp = true
+
+# 允许无 RDMA 设备
+[ib_devices]
+allow_no_usable_devices = true
+
+# MGMTD 客户端配置
 [mgmtd_client]
 mgmtd_server_addresses = ['TCP://192.168.1.10:8000']
 enable_auto_heartbeat = true
-
-[client]
-force_use_tcp = true                # TCP 模式
-
-[ib_devices]
-allow_no_usable_devices = true
 ```
 
-### 2.2 修改 `/opt/3fs/config/meta_main_app.toml`
+### 2.2 修改 `/opt/3fs/config/meta_main_launcher.toml`
 
 ```toml
 allow_empty_node_id = false
 node_id = 100
 ```
 
-### 2.3 修改 `/opt/3fs/config/meta_main.toml`
+### 2.3 修改 `/opt/3fs/config/meta_main_app.toml`
 
-在 `[server]` 段添加 TCP 配置。
+服务组改为 TCP：
+
+```toml
+# 第一个服务组：MetaSerde → TCP
+[[server.base.groups]]
+services = ['MetaSerde']
+network_type = "TCP"
+[server.base.groups.listener]
+listen_port = 8001
+# ...
+
+# 第二个服务组：Core → TCP
+[[server.base.groups]]
+services = ['Core']
+network_type = "TCP"
+[server.base.groups.listener]
+listen_port = 9001
+# ...
+```
+
+添加客户端和 FDB 配置：
+
+```toml
+[server.client]
+force_use_tcp = true
+
+[server.fdb]
+clusterFile = '/etc/foundationdb/fdb.cluster'
+
+[server.kv_engine]
+use_memkv = false
+[server.kv_engine.fdb]
+clusterFile = '/etc/foundationdb/fdb.cluster'
+```
 
 ### 2.4 启动 Meta
 
@@ -185,55 +271,45 @@ sudo /opt/3fs/bin/meta_main \
 
 ---
 
-## 第三步：配置 Storage（两台机器）
+## 第三步：配置 Storage Server（两台机器）
+
+> 注意：Storage 服务端使用 `storage_main_app.toml`（服务端业务配置），
+> 而 `storage_main.toml` 用于 FUSE 客户端，此处不需要修改。
 
 ### 3.1 机器 A - Storage (NodeId=10000)
 
-修改 `/opt/3fs/config/storage_main_launcher.toml`：
-
-```toml
-allow_dev_version = true
-cluster_id = 'mycluster'
-
-[mgmtd_client]
-mgmtd_server_addresses = ['TCP://192.168.1.10:8000']
-enable_auto_heartbeat = true
-
-[client]
-force_use_tcp = true                # TCP 模式
-
-[ib_devices]
-allow_no_usable_devices = true
-```
-
-修改 `/opt/3fs/config/storage_main_app.toml`：
+**修改 `/opt/3fs/config/storage_main_launcher.toml`**：
 
 ```toml
 allow_empty_node_id = false
 node_id = 10000
 ```
 
-修改 `/opt/3fs/config/storage_main.toml` 的服务端配置（关键：TCP 监听 + 数据目录）：
+**修改 `/opt/3fs/config/storage_main_app.toml`**：
+
+服务组改为 TCP：
 
 ```toml
-[ib_devices]
-allow_no_usable_devices = true
-
-[server.groups.0]
+# 第一个服务组：StorageSerde → TCP
+[[server.base.groups]]
+services = ['StorageSerde']
 network_type = "TCP"
-services = ["StorageSerde"]
-listener.listen_port = 8000
+[server.base.groups.listener]
+listen_port = 8000
+# ...
 
-[server.groups.1]
+# 第二个服务组：Core → TCP
+[[server.base.groups]]
+services = ['Core']
 network_type = "TCP"
-services = ["Core"]
-listener.listen_port = 9000
+[server.base.groups.listener]
+listen_port = 9000
+# ...
+```
 
-# 数据存储配置
-[storage]
-target_paths = ['/opt/3fs/data/storage']
+客户端和转发客户端走 TCP：
 
-# client 和 forward_client 都需要 force_use_tcp
+```toml
 [server.client]
 force_use_tcp = true
 
@@ -241,22 +317,31 @@ force_use_tcp = true
 force_use_tcp = true
 ```
 
-启动：
+设置数据目录：
+
+```toml
+[server.targets]
+target_paths = ['/opt/3fs/data/storage']
+allow_disk_without_uuid = true
+```
+
+### 3.2 机器 B - Storage (NodeId=10001)
+
+操作与机器 A 相同，区别：
+- `storage_main_launcher.toml`: `node_id = 10001`
+- 创建数据目录：`sudo mkdir -p /opt/3fs/data/storage`
+
+### 3.3 启动 Storage
 
 ```bash
 sudo mkdir -p /opt/3fs/data/storage
 sudo /opt/3fs/bin/storage_main \
     --launcher_config /opt/3fs/config/storage_main_launcher.toml \
-    --app_config /opt/3fs/config/storage_main_app.toml \
-    --config /opt/3fs/config/storage_main.toml
+    --app_config /opt/3fs/config/storage_main_app.toml
 ```
 
-### 3.2 机器 B - Storage (NodeId=10001)
-
-操作与机器 A 相同，区别在于：
-
-- `storage_main_app.toml`: `node_id = 10001`
-- 启动前创建数据目录: `sudo mkdir -p /opt/3fs/data/storage`
+> 注意：Storage Server 无需 `--config` 参数（不使用 `storage_main.toml`），
+> 服务端配置都在 `storage_main_app.toml` 中。
 
 ---
 
@@ -264,58 +349,42 @@ sudo /opt/3fs/bin/storage_main \
 
 在机器 A 上使用 `admin_cli` 初始化集群。
 
-### 4.1 创建 admin_cli 配置文件
+### 4.1 配置 admin_cli
 
-创建 `/opt/3fs/config/admin_cli.toml`：
-
-```toml
-cluster_id = 'mycluster'
-
-[client]
-force_use_tcp = true
-
-[ib_devices]
-allow_no_usable_devices = true
-
-[mgmtd_client]
-mgmtd_server_addresses = ['TCP://192.168.1.10:8000']
-```
+admin_cli 读取的是 FUSE 客户端配置文件 `hf3fs_fuse_main.toml`，
+因此先配置好 TCP 连接参数（见第五步）即可使用。
 
 ### 4.2 初始化集群
 
 ```bash
 # 1. 初始化
-admin_cli --config /opt/3fs/config/admin_cli.toml \
+admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
     "init-cluster --mgmtd 192.168.1.10:8000 --desc '2-node TCP test cluster'"
 
 # 2. 创建管理员用户
-admin_cli --config /opt/3fs/config/admin_cli.toml \
+admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
     "create-user --root-admin --token admin_token"
 
-# 3. 列出节点，确认 MGMTD/Meta/Storage 都已上线
-admin_cli --config /opt/3fs/config/admin_cli.toml \
+# 3. 列出节点，确认所有节点都已上线
+admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
     "list-nodes"
 ```
 
 ### 4.3 创建 Storage Target
 
-几种 Chain 方案的 Target 数量和 ID 不同，根据自己的场景选择对应方案。
-
-以下命令可批量执行：
-
 ```bash
 # 为机器 A 的 Storage 创建 target
-admin_cli --config /opt/3fs/config/admin_cli.toml \
+admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
     "create-target --node-id 10000 --target-id 1 --disk-index 0 --chain-id 1"
 
-admin_cli --config /opt/3fs/config/admin_cli.toml \
+admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
     "create-target --node-id 10000 --target-id 3 --disk-index 0 --chain-id 2"
 
 # 为机器 B 的 Storage 创建 target
-admin_cli --config /opt/3fs/config/admin_cli.toml \
+admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
     "create-target --node-id 10001 --target-id 2 --disk-index 0 --chain-id 1"
 
-admin_cli --config /opt/3fs/config/admin_cli.toml \
+admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
     "create-target --node-id 10001 --target-id 4 --disk-index 0 --chain-id 2"
 ```
 
@@ -334,7 +403,7 @@ Chain C1: [Target_1(A), Target_2(B)]
 所有 Chunk → C1 → 写请求全部打到 A
 ```
 
-每个 Chunk 2 副本，任意一台宕机数据完好。但所有写入的 Head 都在 A，A 的 CPU/网络负载是 B 的两倍。
+每个 Chunk 2 副本，任意一台宕机数据完好。但所有写入的 Head 都在 A。
 
 ```bash
 cat > /tmp/chain_table.json << 'EOF'
@@ -362,7 +431,7 @@ Chain C1: [Target_1(A), Target_2(B)]     Chain C2: [Target_2(B), Target_1(A)]
 Chunk[偶] → C1 → 写请求打到 A       Chunk[奇] → C2 → 写请求打到 B
 ```
 
-Head 负载在两台机器间轮转，写入性能更均衡。容错能力与方案 A 相同。
+Head 负载在两台机器间轮转，写入性能更均衡。
 
 ```bash
 cat > /tmp/chain_table.json << 'EOF'
@@ -398,15 +467,9 @@ Chain C1: [Target_1(A)]          Chain C2: [Target_2(B)]
 Chunk[偶] → C1 → 只存 A         Chunk[奇] → C2 → 只存 B
 ```
 
-零转发开销，写延迟最低。但任意一台宕机丢失一半 Chunk，整个文件损坏。**仅用于 NDS 直通延迟基准测试。**
+零转发开销，写延迟最低。但任意一台宕机丢失一半 Chunk。**仅用于 NDS 直通延迟基准测试。**
 
 ```bash
-# 需要额外的 Target
-admin_cli --config /opt/3fs/config/admin_cli.toml \
-    "create-target --node-id 10000 --target-id 3 --disk-index 0 --chain-id 3"
-admin_cli --config /opt/3fs/config/admin_cli.toml \
-    "create-target --node-id 10001 --target-id 4 --disk-index 0 --chain-id 4"
-
 cat > /tmp/chain_table.json << 'EOF'
 [
   {
@@ -442,69 +505,38 @@ EOF
 
 ---
 
-#### 方案 D：同机多盘（扩展）
-
-如果每台机器有多块盘，可以创建更多 Target 提高吞吐：
-
-```
-Node_A: 盘1 (Target_1), 盘2 (Target_3)
-Node_B: 盘1 (Target_2), 盘2 (Target_4)
-
-Chain C1: [Target_1(A盘1), Target_2(B盘1)]
-Chain C2: [Target_4(B盘2), Target_3(A盘2)]
-```
-
-```bash
-# 机器 A 盘2
-admin_cli --config /opt/3fs/config/admin_cli.toml \
-    "create-target --node-id 10000 --target-id 3 --disk-index 1 --chain-id 2"
-
-# 机器 B 盘2
-admin_cli --config /opt/3fs/config/admin_cli.toml \
-    "create-target --node-id 10001 --target-id 4 --disk-index 1 --chain-id 2"
-```
-
-Storage 配置需添加第二块盘的路径：
-```toml
-[storage]
-target_paths = ['/opt/3fs/data/storage/disk0', '/opt/3fs/data/storage/disk1']
-```
-
----
-
 创建好 Target 和 Chain 后，上传到集群：
 
 ```bash
-admin_cli --config /opt/3fs/config/admin_cli.toml \
+admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
     "create-chain-table --path /tmp/chain_table.json"
 ```
 
 ---
 
-## 第五步：挂载 FUSE（两台机器）
+## 第五步：配置 FUSE 客户端（两台机器）
 
-### 5.1 创建 FUSE 配置文件
-
-创建 `/opt/3fs/config/hf3fs_fuse.toml`：
+### 5.1 修改 `/opt/3fs/config/hf3fs_fuse_main.toml`
 
 ```toml
-# launcher 配置
 allow_dev_version = true
 cluster_id = 'mycluster'
 mountpoint = '/mnt/3fs'
-token_file = '/opt/3fs/config/fuse_token'
 
-[mgmtd_client]
-mgmtd_server_addresses = ['TCP://192.168.1.10:8000']
-enable_auto_heartbeat = false        # FUSE 客户端不需要心跳
-
+# 客户端出站连接走 TCP
 [client]
 force_use_tcp = true
 
+# 允许无 RDMA 设备
 [ib_devices]
 allow_no_usable_devices = true
 
-# Storage 客户端连接
+# MGMTD 客户端配置（注意 section 名称为 [mgmtd]）
+[mgmtd]
+mgmtd_server_addresses = ['TCP://192.168.1.10:8000']
+auto_heartbeat = false
+
+# Storage 客户端网络
 [storage.net_client]
 force_use_tcp = true
 
@@ -512,7 +544,7 @@ force_use_tcp = true
 force_use_tcp = true
 ```
 
-### 5.2 创建 Token 文件
+### 5.2 设置挂载 Token
 
 ```bash
 echo -n "admin_token" | sudo tee /opt/3fs/config/fuse_token
@@ -521,19 +553,19 @@ sudo chmod 600 /opt/3fs/config/fuse_token
 
 ### 5.3 挂载
 
+FUSE 客户端不需要 `--app_config` 参数（`hf3fs_fuse_main_app.toml` 为空），只需要 `--config`：
+
 ```bash
 # 机器 A
 sudo /opt/3fs/bin/hf3fs_fuse_main \
-    --launcher_config /opt/3fs/config/hf3fs_fuse.toml \
     --config /opt/3fs/config/hf3fs_fuse_main.toml
 
 # 机器 B
 sudo /opt/3fs/bin/hf3fs_fuse_main \
-    --launcher_config /opt/3fs/config/hf3fs_fuse.toml \
     --config /opt/3fs/config/hf3fs_fuse_main.toml
 ```
 
-### 5.4 验证
+### 5.4 挂载验证
 
 ```bash
 # 检查挂载
@@ -553,47 +585,14 @@ sudo cat /mnt/3fs/a.txt
 
 ---
 
-## 配置清单速查表
-
-### TCP-Only 必须修改的配置项
-
-| 配置位置 | 配置项 | 值 | 说明 |
-|---|---|---|---|
-| 所有 `*_launcher.toml` | `cluster_id` | `'mycluster'` | 集群 ID，所有节点一致 |
-| 所有 `*_launcher.toml` | `mgmtd_client.mgmtd_server_addresses` | `['TCP://192.168.1.10:8000']` | MGMTD 地址 |
-| 所有 `*_launcher.toml` | `ib_devices.allow_no_usable_devices` | `true` | 允许无 IB 设备 |
-| 所有 `*_app.toml` | `node_id` | 各节点唯一值 | 节点标识 |
-| MGMTD launcher | `use_memkv` | `true` | 内存 KV，免 FDB |
-| 服务端 `*_main.toml` | `server.groups.0.network_type` | `"TCP"` | 业务服务走 TCP |
-| 服务端 `*_main.toml` | `server.client.force_use_tcp` | `true` | 出站连接走 TCP |
-| 客户端 `*_main.toml` | `client.force_use_tcp` | `true` | 出站连接走 TCP |
-| Storage | `server.forward_client.force_use_tcp` | `true` | Forwarding 走 TCP |
-
-### NodeId 分配
-
-| 机器 | 组件 | NodeId |
-|---|---|---|
-| A | MGMTD | 1 |
-| A | Meta | 100 |
-| A | Storage | 10000 |
-| B | Storage | 10001 |
-
-### 端口分配
-
-| 组件 | 业务端口 | Core 端口 |
-|---|---|---|
-| MGMTD | TCP:8000 | TCP:9000 |
-| Meta | TCP:8001 | TCP:9001 |
-| Storage A | TCP:8000 | TCP:9000 |
-| Storage B | TCP:8000 | TCP:9000 |
-
----
-
 ## 常见问题
 
 ### Q: MGMTD 启动报错 "IB device not found"
 
-确保 `ib_devices.allow_no_usable_devices = true`，且 `server.groups.0.network_type = "TCP"`。
+确保以下配置正确：
+- `mgmtd_main.toml`: `[ib_devices]` → `allow_no_usable_devices = true`
+- `mgmtd_main_app.toml`: `[[server.base.groups]]` 中每个服务组的 `network_type = "TCP"`
+- `mgmtd_main_app.toml`: `[server.client]` → `force_use_tcp = true`
 
 ### Q: 节点注册不上
 
@@ -601,8 +600,24 @@ sudo cat /mnt/3fs/a.txt
 
 ### Q: FUSE 挂载失败
 
-检查 token 文件是否正确，确认 meta/storage 节点都已成功注册。
+- 确认 MGMTD、Meta、Storage 都已成功启动并在 `list-nodes` 中可见
+- 确认 token 文件内容正确
+- FUSE 客户端使用 `--config` 参数指向 `hf3fs_fuse_main.toml`，不使用 `--app_config`
+
+### Q: 配置文件修改后启动报错
+
+三个配置文件各有分工，容易混淆：
+
+| 如果你要修改... | 对应的文件 |
+|-----------------|-----------|
+| 节点 ID | `*_main_launcher.toml`（所有组件都有） |
+| TCP/RDMA 模式、监听端口 | `*_main_app.toml` 的 `[[server.base.groups]]` |
+| 客户端出站连接模式 | `*_main_app.toml` 的 `[server.client]` |
+| IB 设备设置 | `*_main.toml` 的 `[ib_devices]` |
+| MGMTD 地址 | `*_main.toml` 的 `[mgmtd]` 或 `[mgmtd_client]` |
+| FDB 连接 | `mgmtd_main.toml` 的 `[fdb]` / `[kv_engine.fdb]` |
+| 数据目录 | `storage_main_app.toml` 的 `[server.targets]` |
 
 ### Q: 如何添加 NDS 直通 I/O 支持
 
-若机器配备 NDS 硬件，在 Storage 的 `storage_main.toml` 中无需额外配置。NDS 直通通过 `NPU_DIRECT_IO` feature flag 自动启用，数据面由 NDS 硬件完成，不影响 TCP 控制面。
+若机器配备 NDS 硬件，在 Storage 的 `storage_main_app.toml` 中无需额外配置。NDS 直通通过 `NPU_DIRECT_IO` feature flag 自动启用，数据面由 NDS 硬件完成，不影响 TCP 控制面。
