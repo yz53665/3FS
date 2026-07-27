@@ -112,6 +112,8 @@ struct Components {
     return defaultPool;
   }
 
+  CPUExecutorGroup &bgThreadPool() { return *bgThreadPool_; }
+
  protected:
   void updateHeartbeatPayload(const TargetMap &map, bool offline = false);
 
@@ -140,6 +142,7 @@ struct Components {
   StorageOperator storageOperator;
   ReliableUpdate reliableUpdate;
   NdsFileHandleCache ndsCache;
+  CPUExecutorGroup *bgThreadPool_ = nullptr;
   std::atomic<uint32_t> triggerHeartbeatFlag{};
 };
 

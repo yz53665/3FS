@@ -39,6 +39,8 @@ Components::Components(const Config &config)
 Result<Void> Components::start(const flat::AppInfo &appInfo, net::ThreadPoolGroup &tpg) {
   this->appInfo = appInfo;
 
+  bgThreadPool_ = &tpg.bgThreadPool();
+
   RETURN_ON_ERROR_LOG_WRAPPED(INFO, "Start rdmabufPool", rdmabufPool.init(tpg.procThreadPool()));
 
   RETURN_ON_ERROR_LOG_WRAPPED(INFO, "Start readPool", readPool.start());

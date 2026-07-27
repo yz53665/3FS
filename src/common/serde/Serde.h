@@ -343,7 +343,7 @@ inline void serialize(auto &&o, Out<O> &out) {
     out.arrayEnd(o.size());
   } else if constexpr (is_vector_v<T> && std::is_arithmetic_v<T> && isBinaryOut) {
     out.value(o);
-  } else if constexpr (is_vector_v<T> || is_set_v<T>) {
+  } else if constexpr (is_vector_v<T> || is_set_v<T> || is_bounded_array_v<T>) {
     out.arrayBegin();
     for (const auto &item : o) {
       serialize(item, out);
@@ -602,6 +602,19 @@ inline Result<Void> deserialize(auto &o, auto &&in) requires is_specialization<s
         RETURN_AND_LOG_ON_ERROR(deserialize(value, in));
         inserter++ = std::move(value);
       }
+    }
+    return Void{};
+  } else if constexpr (is_bounded_array_v<T>) {
+    if constexpr (isBinaryIn) {
+      Varint64 size = 0;
+      RETURN_AND_LOG_ON_ERROR(deserialize(size, in));
+      if (size != std::tuple_size_v<T>) {
+        return makeError(StatusCode::kInvalidArg,
+                         fmt::format("array size mismatch: expected {}, got {}", std::tuple_size_v<T>, size));
+      }
+    }
+    for (size_t i = 0; i < std::tuple_size_v<T>; ++i) {
+      RETURN_AND_LOG_ON_ERROR(deserialize(o[i], in));
     }
     return Void{};
   } else if constexpr (is_vector_v<T> || is_set_v<T> || is_map_v<T>) {

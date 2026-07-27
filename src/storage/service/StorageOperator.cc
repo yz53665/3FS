@@ -174,13 +174,12 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
       auto ndsHandle = components_.ndsCache.getOrRegister(*fdResult);
 
       // NDS 同步调用卸载到后台线程池
-      ssize_t ret = co_await folly::coro::co_invoke_on(
-          components_.bgExecutor(),
-          [&]() {
-            return nds_read_imported(ndsHandle, &segInfo,
-                (void *)readIO.ndsBufAddr, readIO.length, readIO.offset);
-          }
-      );
+      auto ndsTask = folly::coro::co_invoke(
+          [ndsHandle, &segInfo, bufAddr = (void *)readIO.ndsBufAddr,
+           length = readIO.length, offset = readIO.offset]() -> folly::coro::Task<ssize_t> {
+            co_return nds_read_imported(ndsHandle, &segInfo, bufAddr, length, offset);
+          });
+      ssize_t ret = co_await ndsTask.scheduleOn(&components_.bgThreadPool().randomPick());
 
       if (ret >= 0) {
         it->result().lengthInfo = (uint32_t)ret;
@@ -615,13 +614,12 @@ CoTask<IOResult> StorageOperator::doUpdate(ServiceRequestContext &requestCtx,
     auto ndsHandle = components_.ndsCache.getOrRegister(*fdResult);
 
     // NDS 同步写卸载到后台线程池
-    ssize_t ret = co_await folly::coro::co_invoke_on(
-        components_.bgExecutor(),
-        [&]() {
-          return nds_write_imported(ndsHandle, &segInfo,
-              (void *)updateIO.ndsBufAddr, updateIO.length, updateIO.offset);
-        }
-    );
+    auto ndsTask = folly::coro::co_invoke(
+        [ndsHandle, &segInfo, bufAddr = (void *)updateIO.ndsBufAddr,
+         length = updateIO.length, offset = updateIO.offset]() -> folly::coro::Task<ssize_t> {
+          co_return nds_write_imported(ndsHandle, &segInfo, bufAddr, length, offset);
+        });
+    ssize_t ret = co_await ndsTask.scheduleOn(&components_.bgThreadPool().randomPick());
 
     if (ret < 0) {
       co_return makeError(StorageCode::kChunkWriteFailed);
