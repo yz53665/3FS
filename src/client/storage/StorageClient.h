@@ -193,6 +193,7 @@ class NpuDirectReadIO : public folly::MoveOnly {
   uint32_t npuNodeId;
   uint8_t *ndsBufAddr;
   uint64_t ndsBufSize;
+  uint8_t *data = nullptr;  // placeholder for template compatibility (concatIoRes), not used
   void *userCtx;
   IOResult result;
 };
@@ -239,6 +240,7 @@ class NpuDirectWriteIO : public folly::MoveOnly {
   uint32_t npuNodeId;
   uint8_t *ndsBufAddr;
   uint64_t ndsBufSize;
+  uint8_t *data = nullptr;  // placeholder for template compatibility (concatIoRes), not used
   void *userCtx;
   IOResult result;
   ChecksumInfo checksum;
