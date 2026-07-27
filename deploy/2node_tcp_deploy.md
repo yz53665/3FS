@@ -41,8 +41,14 @@
 
 启动命令格式：
 ```bash
-./binary --launcher_config *_main_launcher.toml --app_config *_main_app.toml --config *_main.toml
+./binary --launcher_cfg *_main_launcher.toml --app_cfg *_main_app.toml
 ```
+
+| 参数 | 文件 | 说明 |
+|------|------|------|
+| `--launcher_cfg` | `*_main_launcher.toml` | 启动器配置：`allow_dev_version`、`cluster_id`、`[client]`、`[mgmtd_client]` |
+| `--app_cfg` | `*_main_app.toml` | 应用标识：`node_id`、`allow_empty_node_id` |
+| （无需指定） | `*_main.toml` | 核心配置，由 MGMTD 远程推送，不在命令行指定 |
 
 ---
 
@@ -103,9 +109,8 @@ MGMTD 的三个配置文件：
 
 | 参数 | 文件 | 需要修改 |
 |------|------|---------|
-| `--launcher_config` | `mgmtd_main_launcher.toml` | 添加 `[client] force_use_tcp`、设置 `cluster_id` |
-| `--app_config` | `mgmtd_main_app.toml` | 设置 `node_id = 1` |
-| `--config` | `mgmtd_main.toml` | 服务组改为 TCP |
+| `--launcher_cfg` | `mgmtd_main_launcher.toml` | 添加 `[client] force_use_tcp`、设置 `cluster_id` |
+| `--app_cfg` | `mgmtd_main_app.toml` | 设置 `node_id = 1` |
 
 ### 1.1 修改 `/opt/3fs/config/mgmtd_main_launcher.toml`
 
@@ -150,9 +155,8 @@ listen_port = 9000
 
 ```bash
 sudo /opt/3fs/bin/mgmtd_main \
-    --launcher_config /opt/3fs/config/mgmtd_main_launcher.toml \
-    --app_config /opt/3fs/config/mgmtd_main_app.toml \
-    --config /opt/3fs/config/mgmtd_main.toml
+    --launcher_cfg /opt/3fs/config/mgmtd_main_launcher.toml \
+    --app_cfg /opt/3fs/config/mgmtd_main_app.toml
 ```
 
 ---
@@ -241,9 +245,8 @@ clusterFile = '/etc/foundationdb/fdb.cluster'
 
 ```bash
 sudo /opt/3fs/bin/meta_main \
-    --launcher_config /opt/3fs/config/meta_main_launcher.toml \
-    --app_config /opt/3fs/config/meta_main_app.toml \
-    --config /opt/3fs/config/meta_main.toml
+    --launcher_cfg /opt/3fs/config/meta_main_launcher.toml \
+    --app_cfg /opt/3fs/config/meta_main_app.toml \
 ```
 
 ---
@@ -323,9 +326,8 @@ allow_disk_without_uuid = true
 ```bash
 sudo mkdir -p /opt/3fs/data/storage
 sudo /opt/3fs/bin/storage_main \
-    --launcher_config /opt/3fs/config/storage_main_launcher.toml \
-    --app_config /opt/3fs/config/storage_main_app.toml \
-    --config /opt/3fs/config/storage_main.toml
+    --launcher_cfg /opt/3fs/config/storage_main_launcher.toml \
+    --app_cfg /opt/3fs/config/storage_main_app.toml \
 ```
 
 ---
@@ -339,15 +341,12 @@ sudo /opt/3fs/bin/storage_main \
 ```bash
 # 初始化
 admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
-    "init-cluster --mgmtd 192.168.1.10:8000 --desc '2-node TCP test cluster'"
 
 # 创建管理员用户
 admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
-    "create-user --root-admin --token admin_token"
 
 # 列出节点
 admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
-    "list-nodes"
 ```
 
 ### 4.2 创建 Storage Target
@@ -355,17 +354,13 @@ admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
 ```bash
 # 为机器 A 创建 target
 admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
-    "create-target --node-id 10000 --target-id 1 --disk-index 0 --chain-id 1"
 
 admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
-    "create-target --node-id 10000 --target-id 3 --disk-index 0 --chain-id 2"
 
 # 为机器 B 创建 target
 admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
-    "create-target --node-id 10001 --target-id 2 --disk-index 0 --chain-id 1"
 
 admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
-    "create-target --node-id 10001 --target-id 4 --disk-index 0 --chain-id 2"
 ```
 
 ### 4.3 选择 Chain 方案
@@ -400,7 +395,6 @@ EOF
 上传 Chain 配置：
 ```bash
 admin_cli --config /opt/3fs/config/hf3fs_fuse_main.toml \
-    "create-chain-table --path /tmp/chain_table.json"
 ```
 
 ---
@@ -451,9 +445,8 @@ sudo chmod 600 /opt/3fs/config/fuse_token
 ```bash
 # 机器 A 和 B
 sudo /opt/3fs/bin/hf3fs_fuse_main \
-    --launcher_config /opt/3fs/config/hf3fs_fuse_main_launcher.toml \
-    --app_config /opt/3fs/config/hf3fs_fuse_main_app.toml \
-    --config /opt/3fs/config/hf3fs_fuse_main.toml
+    --launcher_cfg /opt/3fs/config/hf3fs_fuse_main_launcher.toml \
+    --app_cfg /opt/3fs/config/hf3fs_fuse_main_app.toml
 ```
 
 ### 5.5 验证
