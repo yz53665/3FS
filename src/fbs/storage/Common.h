@@ -252,7 +252,7 @@ struct IOResult {
 static_assert(serde::Serializable<IOResult>);
 
 struct VersionedChainId {
-  bool operator==(const VersionedChainId &) const = default;
+  auto operator<=>(const VersionedChainId &) const = default;
   SERDE_STRUCT_FIELD(chainId, ChainId{});
   SERDE_STRUCT_FIELD(chainVer, ChainVer{});
 };

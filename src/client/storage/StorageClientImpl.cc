@@ -1772,7 +1772,7 @@ CoTryTask<void> StorageClientImpl::batchNpuDirectRead(std::span<NpuDirectReadIO>
     req.payloads.reserve(ios.size());
 
     for (auto *io : ios) {
-      ReadIO readIO;
+      auto &readIO = req.payloads.emplace_back();
       readIO.offset = io->offset;
       readIO.length = io->length;
       readIO.key = GlobalKey{vChainId, io->chunkId};
@@ -1788,7 +1788,6 @@ CoTryTask<void> StorageClientImpl::batchNpuDirectRead(std::span<NpuDirectReadIO>
       readIO.ndsRh2dTokenId = io->rh2dSegInfo.token_id;
       readIO.ndsBufAddr = (uint64_t)io->ndsBufAddr;
       readIO.ndsBufSize = io->ndsBufSize;
-      req.payloads.push_back(std::move(readIO));
     }
 
     // 发送 RPC
