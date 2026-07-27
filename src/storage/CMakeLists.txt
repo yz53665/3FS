@@ -13,6 +13,7 @@ find_library(NDS_LIBRARY nds
         /usr/lib64
         /usr/local/lib
         /usr/local/lib64
+        ${CMAKE_SOURCE_DIR}/third_party/CCDK/output/lib
 )
 
 target_add_lib(storage core-app core-service memory-common storage-fbs mgmtd-client storage-client kv analytics aio chunk_engine profiler)
