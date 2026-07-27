@@ -24,6 +24,7 @@ using ChainId = ::hf3fs::flat::ChainId;
 using ChainVer = ::hf3fs::flat::ChainVersion;
 using TargetId = ::hf3fs::flat::TargetId;
 using NodeId = ::hf3fs::flat::NodeId;
+using NdsEid = std::array<uint8_t, 16>;
 
 STRONG_TYPEDEF(uint32_t, ChunkVer);
 STRONG_TYPEDEF(uint64_t, RequestId);
@@ -314,11 +315,11 @@ struct ReadIO {
   SERDE_STRUCT_FIELD(rdmabuf, net::RDMARemoteBuf{});
   // NDS 直通双段字段 (h2d = 近端同机, rh2d = 远端跨机)
   SERDE_STRUCT_FIELD(npuNodeId, uint32_t{});
-  SERDE_STRUCT_FIELD(ndsH2dEid, std::array<uint8_t, 16>{});
+  SERDE_STRUCT_FIELD(ndsH2dEid, NdsEid{});
   SERDE_STRUCT_FIELD(ndsH2dUasid, uint32_t{});
   SERDE_STRUCT_FIELD(ndsH2dJettyId, uint32_t{});
   SERDE_STRUCT_FIELD(ndsH2dTokenId, uint32_t{});
-  SERDE_STRUCT_FIELD(ndsRh2dEid, std::array<uint8_t, 16>{});
+  SERDE_STRUCT_FIELD(ndsRh2dEid, NdsEid{});
   SERDE_STRUCT_FIELD(ndsRh2dUasid, uint32_t{});
   SERDE_STRUCT_FIELD(ndsRh2dJettyId, uint32_t{});
   SERDE_STRUCT_FIELD(ndsRh2dTokenId, uint32_t{});
@@ -348,11 +349,11 @@ struct UpdateIO {
   SERDE_STRUCT_FIELD(inlinebuf, UInt8Vector{});
   // NDS 直通双段字段 (h2d = 近端同机, rh2d = 远端跨机)
   SERDE_STRUCT_FIELD(npuNodeId, uint32_t{});
-  SERDE_STRUCT_FIELD(ndsH2dEid, std::array<uint8_t, 16>{});
+  SERDE_STRUCT_FIELD(ndsH2dEid, NdsEid{});
   SERDE_STRUCT_FIELD(ndsH2dUasid, uint32_t{});
   SERDE_STRUCT_FIELD(ndsH2dJettyId, uint32_t{});
   SERDE_STRUCT_FIELD(ndsH2dTokenId, uint32_t{});
-  SERDE_STRUCT_FIELD(ndsRh2dEid, std::array<uint8_t, 16>{});
+  SERDE_STRUCT_FIELD(ndsRh2dEid, NdsEid{});
   SERDE_STRUCT_FIELD(ndsRh2dUasid, uint32_t{});
   SERDE_STRUCT_FIELD(ndsRh2dJettyId, uint32_t{});
   SERDE_STRUCT_FIELD(ndsRh2dTokenId, uint32_t{});
