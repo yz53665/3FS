@@ -117,6 +117,9 @@ MGMTD 的三个配置文件：
 ```toml
 allow_dev_version = true
 cluster_id = 'mycluster'
+
+[ib_devices]
+allow_no_usable_devices = true
 ```
 
 ### 1.2 修改 `/opt/3fs/config/mgmtd_main_app.toml`
@@ -127,13 +130,6 @@ node_id = 1
 ```
 
 ### 1.3 修改 `/opt/3fs/config/mgmtd_main.toml`
-
-允许无 RDMA 设备：
-
-```toml
-[ib_devices]
-allow_no_usable_devices = true
-```
 
 将 `[[server.base.groups]]` 中服务组的 `network_type` 从 RDMA 改为 TCP：
 
