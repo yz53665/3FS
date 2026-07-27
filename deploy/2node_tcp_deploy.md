@@ -109,7 +109,7 @@ MGMTD 的三个配置文件：
 
 | 参数 | 文件 | 需要修改 |
 |------|------|---------|
-| `--launcher_cfg` | `mgmtd_main_launcher.toml` | 添加 `[client] force_use_tcp`、设置 `cluster_id` |
+| `--launcher_cfg` | `mgmtd_main_launcher.toml` | 设置 `cluster_id` |
 | `--app_cfg` | `mgmtd_main_app.toml` | 设置 `node_id = 1` |
 
 ### 1.1 修改 `/opt/3fs/config/mgmtd_main_launcher.toml`
@@ -117,9 +117,6 @@ MGMTD 的三个配置文件：
 ```toml
 allow_dev_version = true
 cluster_id = 'mycluster'
-
-[client]
-force_use_tcp = true
 ```
 
 ### 1.2 修改 `/opt/3fs/config/mgmtd_main_app.toml`
@@ -130,6 +127,13 @@ node_id = 1
 ```
 
 ### 1.3 修改 `/opt/3fs/config/mgmtd_main.toml`
+
+允许无 RDMA 设备：
+
+```toml
+[ib_devices]
+allow_no_usable_devices = true
+```
 
 将 `[[server.base.groups]]` 中服务组的 `network_type` 从 RDMA 改为 TCP：
 
