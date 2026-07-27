@@ -116,11 +116,11 @@ class IoRing : public std::enable_shared_from_this<IoRing> {
         cqeSection((IoCqe *)(ringSection + entries)),
         sqeSection((IoSqe *)(cqeSection + entries)),
         slots(entries - 1),
+        npuNodeId_(0),
         shm_(std::move(shm)),
         userInfo_(ui),
         forRead_(read),
-        flags_(flags),
-        npuNodeId_(0) {
+        flags_(flags) {
     XLOGF_IF(FATAL,
              (uintptr_t)(sqeSection + entries + sizeof(sem_t)) > (uintptr_t)(buf + size),
              "sem has a bad address {}, after whole shm starts at {} with {} bytes",

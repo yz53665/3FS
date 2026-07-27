@@ -116,6 +116,15 @@ class BaseObjectVisitor : public ObjectVisitor {
   }
 
   template <typename T>
+  requires is_bounded_array_v<T>
+  void visit(std::string_view k, T &val) {
+    XLOGF(DBG3, "array visit({})", k);
+    for (auto &item : val) {
+      static_cast<Derived *>(this)->template visit(k, item);
+    }
+  }
+
+  template <typename T>
   requires is_optional_v<T>
   void visit(std::string_view k, T &val) {
     XLOGF(DBG3, "optional visit({})", k);

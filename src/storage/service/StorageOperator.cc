@@ -179,7 +179,7 @@ CoTryTask<BatchReadRsp> StorageOperator::batchRead(ServiceRequestContext &reques
            length = readIO.length, offset = readIO.offset]() -> folly::coro::Task<ssize_t> {
             co_return nds_read_imported(ndsHandle, &segInfo, bufAddr, length, offset);
           });
-      ssize_t ret = co_await ndsTask.scheduleOn(&components_.bgThreadPool().randomPick());
+      ssize_t ret = co_await std::move(ndsTask).scheduleOn(&components_.bgThreadPool().randomPick());
 
       if (ret >= 0) {
         it->result().lengthInfo = (uint32_t)ret;
@@ -619,7 +619,7 @@ CoTask<IOResult> StorageOperator::doUpdate(ServiceRequestContext &requestCtx,
          length = updateIO.length, offset = updateIO.offset]() -> folly::coro::Task<ssize_t> {
           co_return nds_write_imported(ndsHandle, &segInfo, bufAddr, length, offset);
         });
-    ssize_t ret = co_await ndsTask.scheduleOn(&components_.bgThreadPool().randomPick());
+    ssize_t ret = co_await std::move(ndsTask).scheduleOn(&components_.bgThreadPool().randomPick());
 
     if (ret < 0) {
       co_return makeError(StorageCode::kChunkWriteFailed);
