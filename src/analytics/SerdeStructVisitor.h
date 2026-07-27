@@ -112,6 +112,14 @@ class BaseStructVisitor : public StructVisitor {
   }
 
   template <typename T>
+  requires is_bounded_array_v<T>
+  void visit(std::string_view k) {
+    XLOGF(DBG3, "array visit({})", k);
+    using ElemValueType = typename T::value_type;
+    static_cast<Derived *>(this)->template visit<ElemValueType>(k);
+  }
+
+  template <typename T>
   requires is_optional_v<T>
   void visit(std::string_view k) {
     XLOGF(DBG3, "optional visit({})", k);

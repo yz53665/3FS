@@ -590,9 +590,19 @@ inline Result<Void> deserialize(auto &o, auto &&in) requires is_specialization<s
         return makeError(StatusCode::kInvalidArg,
                          fmt::format("array size mismatch: expected {}, got {}", std::tuple_size_v<T>, size));
       }
-    }
-    for (size_t i = 0; i < std::tuple_size_v<T>; ++i) {
-      RETURN_AND_LOG_ON_ERROR(deserialize(o[i], in));
+      for (size_t i = 0; i < std::tuple_size_v<T>; ++i) {
+        RETURN_AND_LOG_ON_ERROR(deserialize(o[i], in));
+      }
+    } else {
+      auto containerResult = in.parseContainer();
+      RETURN_AND_LOG_ON_ERROR(containerResult);
+      if (containerResult->first != std::tuple_size_v<T>) {
+        return makeError(StatusCode::kInvalidArg,
+                         fmt::format("array size mismatch: expected {}, got {}", std::tuple_size_v<T>, containerResult->first));
+      }
+      for (size_t i = 0; i < std::tuple_size_v<T>; ++i) {
+        RETURN_AND_LOG_ON_ERROR(deserialize(o[i], in));
+      }
     }
     return Void{};
   } else if constexpr (Container<T> && isBinaryIn) {

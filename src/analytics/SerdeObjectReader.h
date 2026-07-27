@@ -212,6 +212,18 @@ class SerdeObjectReader : public BaseObjectVisitor<SerdeObjectReader<SerdeType>>
   }
 
   template <typename T>
+  requires is_bounded_array_v<T>
+  void visit(std::string_view k, T &val) {
+    std::string str;
+    reader_ >> str;
+    XLOGF(DBG3, "array visit({}): {}", k, str);
+    auto result = serde::fromJsonString(val, str);
+    if (!result) {
+      XLOGF(CRITICAL, "Failed to parse {} from json string: {}", nameof::nameof_short_type<T>(), str);
+    }
+  }
+
+  template <typename T>
   requires is_optional_v<T>
   void visit(std::string_view k, T &val) {
     std::string str;

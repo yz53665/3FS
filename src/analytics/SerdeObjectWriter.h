@@ -215,6 +215,14 @@ class SerdeObjectWriter : public BaseObjectVisitor<SerdeObjectWriter<SerdeType>>
   }
 
   template <typename T>
+  requires is_bounded_array_v<T>
+  void visit(std::string_view k, const T &val) {
+    XLOGF(DBG3, "array visit({})", k);
+    auto str = serde::toJsonString(val);
+    writer_ << str;
+  }
+
+  template <typename T>
   requires is_optional_v<T>
   void visit(std::string_view k, const T &val) {
     XLOGF(DBG3, "optional visit({})", k);

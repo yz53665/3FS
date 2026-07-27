@@ -182,6 +182,16 @@ class SerdeSchemaBuilder : public BaseStructVisitor<SerdeSchemaBuilder<SerdeType
   }
 
   template <typename T>
+  requires is_bounded_array_v<T>
+  void visit(std::string_view k) {
+    XLOGF(DBG3, "array visit({}), fullname: '{}'", k, getFieldFullName(k));
+    fields_.push_back(parquet::schema::PrimitiveNode::Make(getFieldFullName(k),
+                                                           parquet::Repetition::REQUIRED,
+                                                           parquet::LogicalType::String(),
+                                                           parquet::Type::BYTE_ARRAY));
+  }
+
+  template <typename T>
   requires is_optional_v<T>
   void visit(std::string_view k) {
     XLOGF(DBG3, "container visit({}), fullname: '{}'", k, getFieldFullName(k));
